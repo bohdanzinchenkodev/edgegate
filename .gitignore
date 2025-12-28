@@ -1,0 +1,43 @@
+# ===== Go build artifacts =====
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Go coverage / profiling
+*.out
+*.prof
+
+# Build directories
+/bin/
+/dist/
+/build/
+
+# ===== Go workspace =====
+# GoLand / IntelliJ IDEA
+.idea/
+*.iml
+
+# ===== OS files =====
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# ===== Logs =====
+*.log
+
+# ===== Temporary files =====
+tmp/
+temp/
+
+# ===== Environment files =====
+.env
+.env.*
