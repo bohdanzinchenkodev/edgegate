@@ -9,7 +9,8 @@ import (
 	"net/textproto"
 	"net/url"
 	"strings"
-	"time"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 var hopHeaders = []string{
@@ -25,8 +26,9 @@ var hopHeaders = []string{
 }
 
 type EdgeGateProxy struct {
-	upstream  *url.URL
-	Transport http.RoundTripper
+	upstream     *url.URL
+	Transport    http.RoundTripper
+	ErrorHandler func(http.ResponseWriter, *http.Request, error)
 }
 
 func NewProxy(upstream *url.URL) *EdgeGateProxy {
@@ -35,25 +37,17 @@ func NewProxy(upstream *url.URL) *EdgeGateProxy {
 	}
 }
 
-var defaultTransport = &http.Transport{
-	DialContext: (&net.Dialer{
-		Timeout:   5 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}).DialContext,
+var defaultTransport = http.DefaultTransport
 
-	TLSHandshakeTimeout:   5 * time.Second,
-	ResponseHeaderTimeout: 10 * time.Second,
-	ExpectContinueTimeout: 1 * time.Second,
-
-	MaxIdleConns:        100,
-	MaxIdleConnsPerHost: 20,
-	MaxConnsPerHost:     100,
-	IdleConnTimeout:     90 * time.Second,
-
-	DisableKeepAlives: false,
-	ForceAttemptHTTP2: true,
+func (proxy *EdgeGateProxy) getErrorHandler() func(http.ResponseWriter, *http.Request, error) {
+	if proxy.ErrorHandler != nil {
+		return proxy.ErrorHandler
+	}
+	return func(w http.ResponseWriter, req *http.Request, err error) {
+		w.WriteHeader(http.StatusBadGateway)
+		log.Print(err)
+	}
 }
-
 func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if proxy.Transport == nil {
 		proxy.Transport = defaultTransport
@@ -83,12 +77,16 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	//modify request to point to upstream
 	outreq.URL.Host = proxy.upstream.Host
 	outreq.URL.Scheme = proxy.upstream.Scheme
-	outreq.Host = proxy.upstream.Host
+
 	outreq.RequestURI = ""
 
 	upgradeHeader := getUpgradeHeader(req.Header)
-
+	outreq.Close = false
 	removeHopByHopHeaders(outreq.Header)
+
+	if httpguts.HeaderValuesContainsToken(req.Header["Te"], "trailers") {
+		outreq.Header.Set("Te", "trailers")
+	}
 
 	if upgradeHeader != "" {
 		outreq.Header.Set("Connection", "upgrade")
@@ -96,16 +94,16 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	}
 	//send request
 	res, err := proxy.Transport.RoundTrip(outreq)
+	errorHandler := proxy.getErrorHandler()
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Print(err)
+		errorHandler(w, req, err)
 		return
 	}
 
 	if res.StatusCode == http.StatusSwitchingProtocols {
 		err = upgrade(w, res, req)
 		if err != nil {
-			log.Print(err)
+			errorHandler(w, req, err)
 		}
 		return
 	}
@@ -141,12 +139,14 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	var buf []byte
 	_, err = copyBuffer(w, res.Body, buf, fl, isStream)
 	if err != nil {
-		log.Print(err)
+		errorHandler(w, req, err)
+		return
 	}
 
 	err = res.Body.Close()
 	if err != nil {
-		log.Print(err)
+		errorHandler(w, req, err)
+		return
 	}
 	//write trailers
 	prefix := ""
@@ -196,7 +196,7 @@ func upgrade(w http.ResponseWriter, res *http.Response, req *http.Request) error
 	if err == nil {
 		err = <-errch
 	}
-	return err
+	return nil
 }
 func copyStream(dst, src io.ReadWriter, errch chan error) {
 	_, err := io.Copy(dst, src)
@@ -213,6 +213,9 @@ func copyStream(dst, src io.ReadWriter, errch chan error) {
 }
 
 func getUpgradeHeader(h http.Header) string {
+	if !httpguts.HeaderValuesContainsToken(h["Connection"], "Upgrade") {
+		return ""
+	}
 	return h.Get("Upgrade")
 }
 func copyBuffer(dst io.Writer, src io.Reader, buf []byte, fl http.Flusher, isStream bool) (written int64, err error) {
