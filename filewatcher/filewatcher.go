@@ -13,26 +13,32 @@ const maxDurWithoutHashing time.Duration = 10 * time.Minute
 
 var defaultInterval = 5 * time.Second
 
+type FileChangedHandler func(file []byte)
+type ErrorHandler func(err error)
 type FileWatcher struct {
-	filePath        string
-	Interval        time.Duration
-	BytesCh         chan []byte
-	ErrorCh         chan error
-	lastSize        int64
-	lastFileModTime time.Time
-	lastHash        []byte
-	lastHashingTime time.Time
+	filePath           string
+	Interval           time.Duration
+	FileChangedHandler FileChangedHandler
+	ErrorHandler       ErrorHandler
+	bytesCh            chan []byte
+	errorCh            chan error
+	lastSize           int64
+	lastFileModTime    time.Time
+	lastHash           []byte
+	lastHashingTime    time.Time
 }
 
 func NewFileWatcher(filePath string) *FileWatcher {
 	return &FileWatcher{
 		filePath: filePath,
-		ErrorCh:  make(chan error, 1),
-		BytesCh:  make(chan []byte, 1),
+		errorCh:  make(chan error, 1),
+		bytesCh:  make(chan []byte, 1),
 	}
 }
 
 func (fw *FileWatcher) Watch(ctx context.Context) {
+	go fw.runHandlers(ctx)
+
 	interval := fw.Interval
 	if interval == 0 {
 		interval = defaultInterval
@@ -42,7 +48,7 @@ func (fw *FileWatcher) Watch(ctx context.Context) {
 
 	_, err := fw.checkOnce()
 	if err != nil {
-		fw.ErrorCh <- err
+		fw.errorCh <- err
 	}
 	for {
 		select {
@@ -51,9 +57,31 @@ func (fw *FileWatcher) Watch(ctx context.Context) {
 		case <-ticker.C:
 			fileData, err := fw.checkOnce()
 			if err != nil {
-				fw.ErrorCh <- err
+				select {
+				case fw.errorCh <- err:
+				default:
+				}
 			} else if fileData != nil {
-				fw.BytesCh <- fileData
+				select {
+				case fw.bytesCh <- fileData:
+				default:
+				}
+			}
+		}
+	}
+}
+func (fw *FileWatcher) runHandlers(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case err := <-fw.errorCh:
+			if fw.ErrorHandler != nil {
+				fw.ErrorHandler(err)
+			}
+		case fileData := <-fw.bytesCh:
+			if fw.FileChangedHandler != nil {
+				fw.FileChangedHandler(fileData)
 			}
 		}
 	}
