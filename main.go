@@ -1,26 +1,44 @@
 package main
 
 import (
-	egproxy "edgegate/proxy"
+	"context"
+	"edgegate/filewatcher"
 	"flag"
 	"log"
-	"net/http"
-	"net/url"
 )
 
 func main() {
-	listenAddr := flag.String("listen", ":8080", "listen address")
-	upstreamURL := flag.String("upstream", "http://localhost:8000", "upstream base URL")
-	/*rlCapacity := flag.Int("rl_capacity", 10, "rate limiter capacity")
-	rlRefillRate := flag.Int("rl_refill_rate", 2, "rate limiter refill rate")
-	rlTokenUsageRate := flag.Int("rl_token_usage_rate", 1, "rate limiter token usage rate")
-	flag.Parse()*/
+	/*listenAddr := flag.String("listen", ":8080", "listen address")
+	upstreamURL := flag.String("upstream", "http://localhost:8000", "upstream base URL")*/
+	configPath := flag.String("config_path", "./edgegate.yaml", "config path")
 
-	upstream, _ := url.Parse(*upstreamURL)
+	watcher := filewatcher.NewFileWatcher(*configPath)
+	ctx, cancel := context.WithCancel(context.Background())
+	go watcher.Watch(ctx)
+	defer cancel()
+
+	go func() {
+
+		for {
+			select {
+			case err := <-watcher.ErrorCh:
+				log.Println(err)
+			case filedata := <-watcher.BytesCh:
+				log.Printf("new file data %s\n", filedata)
+			default:
+
+			}
+		}
+	}()
+	select {}
+
+	/*upstream, _ := url.Parse(*upstreamURL)
 
 	proxy := egproxy.NewProxy(upstream)
 	mux := http.NewServeMux()
-	mux.Handle("/", proxy)
+	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		proxy.ServeHTTP(writer, request)
+	})
 	log.Println("listening on :8080 ->", upstream.String())
-	log.Fatal(http.ListenAndServe(*listenAddr, mux))
+	log.Fatal(http.ListenAndServe(*listenAddr, mux))*/
 }
