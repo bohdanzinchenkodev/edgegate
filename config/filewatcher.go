@@ -1,4 +1,4 @@
-package filewatcher
+package config
 
 import (
 	"bytes"
