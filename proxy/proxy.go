@@ -26,9 +26,11 @@ var hopHeaders = []string{
 }
 
 type EdgeGateProxy struct {
-	upstream     *url.URL
-	Transport    http.RoundTripper
-	ErrorHandler func(http.ResponseWriter, *http.Request, error)
+	upstream              *url.URL
+	Prefix                string
+	Transport             http.RoundTripper
+	ErrorHandler          func(http.ResponseWriter, *http.Request, error)
+	ReplaceHostToUpstream bool
 }
 
 func NewProxy(upstream *url.URL) *EdgeGateProxy {
@@ -66,6 +68,15 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	//clone request
 	ctx := req.Context()
 	outreq := req.Clone(ctx)
+	if proxy.Prefix != "" {
+		outreq.RequestURI = ""
+		outreq.Pattern = "/"
+		outreq.URL.Path = "/"
+	}
+	if proxy.ReplaceHostToUpstream {
+		outreq.Host = proxy.upstream.Host
+		log.Println(outreq.Host)
+	}
 	//add x-forwarded headers
 	if prior := outreq.Header.Get("X-Forwarded-For"); prior != "" {
 		outreq.Header.Set("X-Forwarded-For", prior+", "+ip)
