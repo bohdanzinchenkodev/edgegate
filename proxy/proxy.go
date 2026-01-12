@@ -75,7 +75,6 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	}
 	if proxy.ReplaceHostToUpstream {
 		outreq.Host = proxy.upstream.Host
-		log.Println(outreq.Host)
 	}
 	//add x-forwarded headers
 	if prior := outreq.Header.Get("X-Forwarded-For"); prior != "" {
