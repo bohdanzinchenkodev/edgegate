@@ -12,7 +12,8 @@ type listener struct {
 	Routes []route `yaml:"routes"`
 }
 type route struct {
-	Match match `yaml:"match"`
+	Match    match  `yaml:"match"`
+	Upstream string `yaml:"upstream"`
 }
 type match struct {
 	PathPrefix string `yaml:"path_prefix"`

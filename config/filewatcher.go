@@ -20,6 +20,7 @@ type FileWatcher struct {
 	Interval           time.Duration
 	FileChangedHandler FileChangedHandler
 	ErrorHandler       ErrorHandler
+	ReturnBytesOnInit  bool
 	bytesCh            chan []byte
 	errorCh            chan error
 	lastSize           int64
@@ -46,7 +47,11 @@ func (fw *FileWatcher) Watch(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	_, err := fw.checkOnce()
+	fileData, err := fw.checkOnce()
+
+	if fw.ReturnBytesOnInit {
+		fw.bytesCh <- fileData
+	}
 	if err != nil {
 		fw.errorCh <- err
 	}
@@ -55,7 +60,7 @@ func (fw *FileWatcher) Watch(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			fileData, err := fw.checkOnce()
+			fileData, err = fw.checkOnce()
 			if err != nil {
 				select {
 				case fw.errorCh <- err:
@@ -64,13 +69,16 @@ func (fw *FileWatcher) Watch(ctx context.Context) {
 			} else if fileData != nil {
 				select {
 				case fw.bytesCh <- fileData:
+					log.Println("fw.bytesCh <- fileData")
 				default:
+					log.Println("default")
 				}
 			}
 		}
 	}
 }
 func (fw *FileWatcher) runHandlers(ctx context.Context) {
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -85,6 +93,7 @@ func (fw *FileWatcher) runHandlers(ctx context.Context) {
 			}
 		}
 	}
+
 }
 func (fw *FileWatcher) checkOnce() ([]byte, error) {
 	file, err := os.Stat(fw.filePath)
@@ -104,7 +113,7 @@ func (fw *FileWatcher) checkOnce() ([]byte, error) {
 
 		fw.lastHashingTime = time.Now()
 		fw.update(newModTime, newSize, hash)
-		return nil, nil
+		return fileData, nil
 	}
 
 	//if metadata is the same and time that passed is not requires us to check the content, then just skip
