@@ -5,9 +5,9 @@ import (
 )
 
 type ReverseProxyConfig struct {
-	Listeners []listener `yaml:"listeners"`
+	Listeners []Listener `yaml:"listeners"`
 }
-type listener struct {
+type Listener struct {
 	Listen string  `yaml:"listen"`
 	Routes []route `yaml:"routes"`
 }
@@ -17,6 +17,7 @@ type route struct {
 }
 type match struct {
 	PathPrefix string `yaml:"path_prefix"`
+	Host       string `yaml:"host"`
 }
 
 func ParseConfig(file []byte) (*ReverseProxyConfig, error) {

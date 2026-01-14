@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -55,17 +56,16 @@ func initEngine(cfg *config.ReverseProxyConfig) {
 		serv := &http.Server{Addr: l.Listen}
 
 		mux := http.NewServeMux()
-		for _, r := range l.Routes {
-			upstream, err := url.Parse(r.Upstream)
+
+		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream, err := getUpstream(r, &l)
 			if err != nil {
-				log.Print(err)
-				continue
+				http.Error(w, "Bad Gateway", http.StatusBadGateway)
+				return
 			}
 			proxy := NewProxy(upstream)
-			proxy.Prefix = r.Match.PathPrefix
-			proxy.ReplaceHostToUpstream = true
-			mux.Handle(proxy.Prefix, proxy)
-		}
+			proxy.ServeHTTP(w, r)
+		}))
 		serv.Handler = mux
 
 		ps := &proxyServer{
@@ -79,6 +79,23 @@ func initEngine(cfg *config.ReverseProxyConfig) {
 	mu.Lock()
 	servers = newServers
 	mu.Unlock()
+}
+func getUpstream(r *http.Request, listener *config.Listener) (*url.URL, error) {
+	host := r.Host
+	path := r.URL.Path
+	for _, route := range listener.Routes {
+		//check host match
+		log.Printf("Checking route: host=%v,path_prefix=%v -> upstream=%v\n", route.Match.Host, route.Match.PathPrefix, route.Upstream)
+		if route.Match.Host != "" && strings.EqualFold(route.Match.Host, host) {
+			return url.Parse(route.Upstream)
+		}
+		//check path prefix match
+		if route.Match.PathPrefix != "" && strings.HasPrefix(path, route.Match.PathPrefix) {
+			return url.Parse(route.Upstream)
+		}
+	}
+	return nil, errors.New("no matching upstream found")
+
 }
 
 func startServer(ps *proxyServer) {
