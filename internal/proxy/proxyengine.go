@@ -2,7 +2,7 @@ package egproxy
 
 import (
 	"context"
-	"edgegate/config"
+	config2 "edgegate/internal/config"
 	"errors"
 	"log"
 	"net/http"
@@ -28,13 +28,13 @@ func StartEngine(ctx context.Context, configPath string) {
 		shutdownActiveServers()
 	}()
 
-	fw := config.NewFileWatcher(configPath)
+	fw := config2.NewFileWatcher(configPath)
 	fw.ReturnBytesOnInit = true
 
 	fw.FileChangedHandler = func(file []byte) {
 		shutdownActiveServers()
 
-		cfg, err := config.ParseConfig(file)
+		cfg, err := config2.ParseConfig(file)
 		if err != nil {
 			log.Print(err)
 			return
@@ -49,7 +49,7 @@ func StartEngine(ctx context.Context, configPath string) {
 	fw.Watch(ctx)
 }
 
-func initEngine(cfg *config.ReverseProxyConfig) {
+func initEngine(cfg *config2.ReverseProxyConfig) {
 	newServers := make([]*proxyServer, 0)
 
 	for _, l := range cfg.Listeners {
@@ -80,7 +80,7 @@ func initEngine(cfg *config.ReverseProxyConfig) {
 	servers = newServers
 	mu.Unlock()
 }
-func getUpstream(r *http.Request, listener *config.Listener) (*url.URL, error) {
+func getUpstream(r *http.Request, listener *config2.Listener) (*url.URL, error) {
 	host := r.Host
 	path := r.URL.Path
 	for _, route := range listener.Routes {

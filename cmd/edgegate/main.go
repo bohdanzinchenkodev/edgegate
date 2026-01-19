@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	egproxy "edgegate/proxy"
+	"edgegate/internal/proxy"
 	"flag"
 	"os/signal"
 	"syscall"
@@ -39,6 +39,6 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", mux))*/
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	configPath := flag.String("config_path", "./edgegate.yaml", "config path")
+	configPath := flag.String("config_path", "./configs/edgegate.yaml", "config path")
 	egproxy.StartEngine(rootCtx, *configPath)
 }
