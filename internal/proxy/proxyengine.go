@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,27 +28,23 @@ type proxyServer struct {
 }
 
 type listenerRouter struct {
-	mu sync.RWMutex
-	cl *compiledListener
+	mu      sync.RWMutex
+	current atomic.Value // stores *compiledListener
 }
 
 func newListenerRouter(initial *compiledListener) *listenerRouter {
-	return &listenerRouter{cl: initial}
+	lr := &listenerRouter{}
+	lr.current.Store(initial)
+	return lr
 }
 
 func (lr *listenerRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	lr.mu.RLock()
-	cl := lr.cl
-	lr.mu.RUnlock()
-
-	// delegate to compiled routes
+	cl := lr.current.Load().(*compiledListener)
 	cl.ServeHTTP(w, r)
 }
 
 func (lr *listenerRouter) Update(newCL *compiledListener) {
-	lr.mu.Lock()
-	lr.cl = newCL
-	lr.mu.Unlock()
+	lr.current.Store(newCL)
 }
 
 type compiledListener struct {
