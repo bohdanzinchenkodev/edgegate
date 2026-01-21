@@ -2,9 +2,10 @@ package egproxy
 
 import (
 	"context"
-	config2 "edgegate/internal/config"
+	"edgegate/internal/config"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,6 +22,17 @@ type proxyServer struct {
 	server *http.Server
 	done   chan struct{}
 }
+type compiledListener struct {
+	listen string
+	routes []compiledRoute
+}
+
+type compiledRoute struct {
+	host       string
+	pathPrefix string
+	upstream   string
+	proxy      http.Handler
+}
 
 func StartEngine(ctx context.Context, configPath string) {
 	go func() {
@@ -28,13 +40,13 @@ func StartEngine(ctx context.Context, configPath string) {
 		shutdownActiveServers()
 	}()
 
-	fw := config2.NewFileWatcher(configPath)
+	fw := config.NewFileWatcher(configPath)
 	fw.ReturnBytesOnInit = true
 
 	fw.FileChangedHandler = func(file []byte) {
 		shutdownActiveServers()
 
-		cfg, err := config2.ParseConfig(file)
+		cfg, err := config.ParseConfig(file)
 		if err != nil {
 			log.Print(err)
 			return
@@ -49,22 +61,27 @@ func StartEngine(ctx context.Context, configPath string) {
 	fw.Watch(ctx)
 }
 
-func initEngine(cfg *config2.ReverseProxyConfig) {
+func initEngine(cfg *config.ReverseProxyConfig) {
 	newServers := make([]*proxyServer, 0)
 
 	for _, l := range cfg.Listeners {
 		serv := &http.Server{Addr: l.Listen}
 
 		mux := http.NewServeMux()
+		cl, err := compileListener(l)
+		if err != nil {
+			log.Print(err)
+			continue
+		}
 
 		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			upstream, err := getUpstream(r, &l)
+			handler, err := getHandler(r, cl)
 			if err != nil {
 				http.Error(w, "Bad Gateway", http.StatusBadGateway)
 				return
 			}
-			proxy := NewProxy(upstream)
-			proxy.ServeHTTP(w, r)
+
+			handler.ServeHTTP(w, r)
 		}))
 		serv.Handler = mux
 
@@ -80,21 +97,40 @@ func initEngine(cfg *config2.ReverseProxyConfig) {
 	servers = newServers
 	mu.Unlock()
 }
-func getUpstream(r *http.Request, listener *config2.Listener) (*url.URL, error) {
-	host := r.Host
+func compileListener(l config.Listener) (*compiledListener, error) {
+	cl := &compiledListener{
+		listen: l.Listen,
+	}
+	for _, r := range l.Routes {
+		upstreamUrl, err := url.Parse(r.Upstream)
+		if err != nil {
+			return nil, err
+		}
+		proxy := NewProxy(upstreamUrl)
+		cl.routes = append(cl.routes, compiledRoute{
+			host:       r.Match.Host,
+			pathPrefix: r.Match.PathPrefix,
+			upstream:   r.Upstream,
+			proxy:      proxy,
+		})
+	}
+	return cl, nil
+}
+func getHandler(r *http.Request, cl *compiledListener) (http.Handler, error) {
+	host := stripPort(r.Host)
 	path := r.URL.Path
-	for _, route := range listener.Routes {
+	for _, route := range cl.routes {
 		//check host match
-		log.Printf("Checking route: host=%v,path_prefix=%v -> upstream=%v\n", route.Match.Host, route.Match.PathPrefix, route.Upstream)
-		if route.Match.Host != "" && strings.EqualFold(route.Match.Host, host) {
-			return url.Parse(route.Upstream)
+		log.Printf("Checking route: host=%v,path_prefix=%v -> upstream=%v\n", route.host, route.pathPrefix, route.upstream)
+		if route.host != "" && strings.EqualFold(route.host, host) {
+			return route.proxy, nil
 		}
 		//check path prefix match
-		if route.Match.PathPrefix != "" && strings.HasPrefix(path, route.Match.PathPrefix) {
-			return url.Parse(route.Upstream)
+		if route.pathPrefix != "" && strings.HasPrefix(path, route.pathPrefix) {
+			return route.proxy, nil
 		}
 	}
-	return nil, errors.New("no matching upstream found")
+	return nil, errors.New("no matching routes found")
 
 }
 
@@ -135,4 +171,10 @@ func shutdownActiveServers() {
 	}
 
 	wg.Wait()
+}
+func stripPort(h string) string {
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		return host
+	}
+	return h
 }
