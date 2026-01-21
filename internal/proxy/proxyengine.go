@@ -13,15 +13,43 @@ import (
 	"time"
 )
 
+// Global state for running proxy servers
+// server -> listenerRouter (ServeHTTP) -> compiledListener (ServeHTTP) -> compiledRoute -> proxy (ServeHTTP)
 var (
-	servers []*proxyServer
 	mu      sync.Mutex
+	servers = map[string]*proxyServer{}
 )
 
 type proxyServer struct {
 	server *http.Server
 	done   chan struct{}
+	router *listenerRouter
 }
+
+type listenerRouter struct {
+	mu sync.RWMutex
+	cl *compiledListener
+}
+
+func newListenerRouter(initial *compiledListener) *listenerRouter {
+	return &listenerRouter{cl: initial}
+}
+
+func (lr *listenerRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	lr.mu.RLock()
+	cl := lr.cl
+	lr.mu.RUnlock()
+
+	// delegate to compiled routes
+	cl.ServeHTTP(w, r)
+}
+
+func (lr *listenerRouter) Update(newCL *compiledListener) {
+	lr.mu.Lock()
+	lr.cl = newCL
+	lr.mu.Unlock()
+}
+
 type compiledListener struct {
 	listen string
 	routes []compiledRoute
@@ -31,147 +59,178 @@ type compiledRoute struct {
 	host       string
 	pathPrefix string
 	upstream   string
-	proxy      http.Handler
+	proxy      http.Handler // prebuilt proxy
+}
+
+func (cl *compiledListener) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	host := stripPort(r.Host)
+	path := r.URL.Path
+
+	for _, route := range cl.routes {
+		// host match
+		if route.host != "" && strings.EqualFold(route.host, host) {
+			route.proxy.ServeHTTP(w, r)
+			return
+		}
+		// path prefix match
+		if route.pathPrefix != "" && strings.HasPrefix(path, route.pathPrefix) {
+			route.proxy.ServeHTTP(w, r)
+			return
+		}
+	}
+
+	http.Error(w, "Bad Gateway", http.StatusBadGateway)
+}
+
+func compileListener(l config.Listener) (*compiledListener, error) {
+	cl := &compiledListener{listen: l.Listen}
+	cl.routes = make([]compiledRoute, 0, len(l.Routes))
+
+	for _, r := range l.Routes {
+		u, err := url.Parse(r.Upstream)
+		if err != nil {
+			return nil, err
+		}
+		p := NewProxy(u) // built once per reload, reused per request
+
+		cl.routes = append(cl.routes, compiledRoute{
+			host:       r.Match.Host,
+			pathPrefix: r.Match.PathPrefix,
+			upstream:   r.Upstream,
+			proxy:      p,
+		})
+	}
+	return cl, nil
 }
 
 func StartEngine(ctx context.Context, configPath string) {
 	go func() {
 		<-ctx.Done()
-		shutdownActiveServers()
+		shutdownAll()
 	}()
 
 	fw := config.NewFileWatcher(configPath)
 	fw.ReturnBytesOnInit = true
 
 	fw.FileChangedHandler = func(file []byte) {
-		shutdownActiveServers()
-
 		cfg, err := config.ParseConfig(file)
 		if err != nil {
 			log.Print(err)
 			return
 		}
-		initEngine(cfg)
+		applyConfig(cfg)
 	}
 
-	fw.ErrorHandler = func(err error) {
-		log.Print(err)
-	}
+	fw.ErrorHandler = func(err error) { log.Print(err) }
 
 	fw.Watch(ctx)
 }
 
-func initEngine(cfg *config.ReverseProxyConfig) {
-	newServers := make([]*proxyServer, 0)
-
+func applyConfig(cfg *config.ReverseProxyConfig) {
+	// 1) compile new listeners
+	newCompiled := make(map[string]*compiledListener, len(cfg.Listeners))
 	for _, l := range cfg.Listeners {
-		serv := &http.Server{Addr: l.Listen}
-
-		mux := http.NewServeMux()
 		cl, err := compileListener(l)
 		if err != nil {
 			log.Print(err)
 			continue
 		}
+		newCompiled[cl.listen] = cl
+	}
 
-		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			handler, err := getHandler(r, cl)
-			if err != nil {
-				http.Error(w, "Bad Gateway", http.StatusBadGateway)
-				return
+	// 2) decide what to start/update/stop
+	var (
+		toStart  []*proxyServer
+		toStop   []*proxyServer
+		toUpdate []struct {
+			ps *proxyServer
+			cl *compiledListener
+		}
+	)
+
+	mu.Lock()
+
+	// update existing or create new
+	for addr, cl := range newCompiled {
+		if ps, exists := servers[addr]; exists {
+			toUpdate = append(toUpdate, struct {
+				ps *proxyServer
+				cl *compiledListener
+			}{ps: ps, cl: cl})
+		} else {
+			router := newListenerRouter(cl)
+
+			srv := &http.Server{
+				Addr:    addr,
+				Handler: router,
 			}
 
-			handler.ServeHTTP(w, r)
-		}))
-		serv.Handler = mux
+			ps := &proxyServer{
+				server: srv,
+				done:   make(chan struct{}),
+				router: router,
+			}
 
-		ps := &proxyServer{
-			server: serv,
-			done:   make(chan struct{}),
+			servers[addr] = ps
+			toStart = append(toStart, ps)
 		}
-		newServers = append(newServers, ps)
+	}
+
+	// stop removed listeners
+	for addr, ps := range servers {
+		if _, stillExists := newCompiled[addr]; !stillExists {
+			delete(servers, addr)
+			toStop = append(toStop, ps)
+		}
+	}
+
+	mu.Unlock()
+
+	// 3) perform actions outside global lock
+	for _, upd := range toUpdate {
+		upd.ps.router.Update(upd.cl)
+	}
+
+	for _, ps := range toStart {
 		go startServer(ps)
 	}
 
-	mu.Lock()
-	servers = newServers
-	mu.Unlock()
-}
-func compileListener(l config.Listener) (*compiledListener, error) {
-	cl := &compiledListener{
-		listen: l.Listen,
+	for _, ps := range toStop {
+		go shutdownServer(ps)
 	}
-	for _, r := range l.Routes {
-		upstreamUrl, err := url.Parse(r.Upstream)
-		if err != nil {
-			return nil, err
-		}
-		proxy := NewProxy(upstreamUrl)
-		cl.routes = append(cl.routes, compiledRoute{
-			host:       r.Match.Host,
-			pathPrefix: r.Match.PathPrefix,
-			upstream:   r.Upstream,
-			proxy:      proxy,
-		})
-	}
-	return cl, nil
-}
-func getHandler(r *http.Request, cl *compiledListener) (http.Handler, error) {
-	host := stripPort(r.Host)
-	path := r.URL.Path
-	for _, route := range cl.routes {
-		//check host match
-		log.Printf("Checking route: host=%v,path_prefix=%v -> upstream=%v\n", route.host, route.pathPrefix, route.upstream)
-		if route.host != "" && strings.EqualFold(route.host, host) {
-			return route.proxy, nil
-		}
-		//check path prefix match
-		if route.pathPrefix != "" && strings.HasPrefix(path, route.pathPrefix) {
-			return route.proxy, nil
-		}
-	}
-	return nil, errors.New("no matching routes found")
-
 }
 
 func startServer(ps *proxyServer) {
-	log.Printf("Starting server on address: %v\n", ps.server.Addr)
+	log.Printf("Starting server on %v\n", ps.server.Addr)
+
 	err := ps.server.ListenAndServe()
 	close(ps.done)
 
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Print(err)
 	}
-
-	log.Printf("server on %v stopped\n", ps.server.Addr)
+	log.Printf("Server on %v stopped\n", ps.server.Addr)
 }
 
-func shutdownActiveServers() {
+func shutdownServer(ps *proxyServer) {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_ = ps.server.Shutdown(shutdownCtx)
+	<-ps.done
+}
+
+func shutdownAll() {
 	mu.Lock()
 	old := servers
-	servers = nil
+	servers = map[string]*proxyServer{}
 	mu.Unlock()
 
-	if len(old) == 0 {
-		return
+	for _, ps := range old {
+		go shutdownServer(ps)
 	}
-
-	var wg sync.WaitGroup
-	wg.Add(len(old))
-
-	for _, s := range old {
-		s := s
-		go func() {
-			defer wg.Done()
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			_ = s.server.Shutdown(shutdownCtx)
-			<-s.done
-		}()
-	}
-
-	wg.Wait()
 }
+
 func stripPort(h string) string {
 	if host, _, err := net.SplitHostPort(h); err == nil {
 		return host
