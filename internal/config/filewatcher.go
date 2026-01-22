@@ -116,7 +116,7 @@ func (fw *FileWatcher) checkOnce() ([]byte, error) {
 		return fileData, nil
 	}
 
-	//if metadata is the same and time that passed is not requires us to check the content, then just skip
+	//if metadata is the same and time that passed doesn't require us to check the content, then just skip
 	if newModTime == fw.lastFileModTime && newSize == fw.lastSize && !fw.hashingRequired() {
 		log.Println("file stayed the same")
 		return nil, nil
