@@ -101,10 +101,6 @@ func compileListener(l config.Listener) (*compiledListener, error) {
 }
 
 func StartEngine(ctx context.Context, configPath string) {
-	go func() {
-		<-ctx.Done()
-		shutdownAll()
-	}()
 
 	fw := config.NewFileWatcher(configPath)
 	fw.ReturnBytesOnInit = true
@@ -121,6 +117,9 @@ func StartEngine(ctx context.Context, configPath string) {
 	fw.ErrorHandler = func(err error) { log.Print(err) }
 
 	fw.Watch(ctx)
+	//watch returns when ctx.Done()
+	//it means we should shut down all servers
+	shutdownAll()
 }
 
 func applyConfig(cfg *config.ReverseProxyConfig) {
@@ -223,9 +222,16 @@ func shutdownAll() {
 	servers = map[string]*proxyServer{}
 	mu.Unlock()
 
+	var wg sync.WaitGroup
+	wg.Add(len(old))
 	for _, ps := range old {
-		go shutdownServer(ps)
+		ps := ps
+		go func() {
+			shutdownServer(ps)
+			wg.Done()
+		}()
 	}
+	wg.Wait()
 }
 
 func stripPort(h string) string {
