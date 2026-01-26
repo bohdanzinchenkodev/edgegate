@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	deleteAfter = 300 * time.Second //delete entries unused for 300 seconds
-	wheelSize   = 300               //number of slots in the wheel
+	deleteAfter = 10 * time.Second //delete entries unused for 300 seconds
+	wheelSize   = 10               //number of slots in the wheel
 )
 const cleanupInterval = 1 * time.Second
 
@@ -20,29 +20,29 @@ type RateLimiter struct {
 	refillRate int
 	usageRate  int
 	mux        sync.Mutex
-	/*wheel      wheel*/
+	wheel      wheel
 }
 
-/*type wheel struct {
+type wheel struct {
 	slots []*slot
 	cur   int
 }
 type slot struct {
 	keys []string
 	mux  sync.Mutex
-}*/
+}
 
 func NewRateLimiter(capacity, refillRate, usageRate int) *RateLimiter {
-	/*slots := make([]*slot, wheelSize)
+	slots := make([]*slot, wheelSize)
 	for i := range slots {
 		slots[i] = &slot{}
-	}*/
+	}
 	return &RateLimiter{
 		entries:    sync.Map{},
 		capacity:   capacity,
 		refillRate: refillRate,
 		usageRate:  usageRate,
-		/*wheel:      wheel{slots: slots},*/
+		wheel:      wheel{slots: slots},
 	}
 }
 func (rl *RateLimiter) AllowReqMiddleware(next http.Handler) http.Handler {
@@ -65,25 +65,33 @@ func (rl *RateLimiter) AllowReq(key string) bool {
 	if !ok {
 		return false
 	}
-	log.Printf("Bucket info - capacity: %v, tokens: %v", v.capacity, v.tokens)
+	/*log.Printf("Bucket info - capacity: %v, tokens: %v", v.capacity, v.tokens)*/
+
+	//set expiry date for bucket
+	v.mux.Lock()
 	v.expireAt = time.Now().Add(deleteAfter)
+	v.mux.Unlock()
+
 	// Add to wheel slot
-	/*rl.addToWheel(key)*/
+	rl.addToWheel(key)
 	res := v.take(rl.usageRate)
 	return res
 }
 
-/*
-	func (rl *RateLimiter) addToWheel(key string) {
-		currentTick := rl.wheel.cur
-		delaySlots := int(deleteAfter / cleanupInterval)
-		slotIndex := (cur + delaySlots) % wheelSize
-		s := rl.wheel.slots[slotIndex]
-		s.mux.Lock()
-		s.keys = append(s.keys, key)
-		s.mux.Unlock()
-	}
-*/
+func (rl *RateLimiter) addToWheel(key string) {
+	currentTick := time.Now().Unix()
+	da := int64(deleteAfter.Seconds())
+	//ex: (531 + 300) % 300 = 231
+	slotIndex := (currentTick + da) % wheelSize
+	s := rl.wheel.slots[slotIndex]
+
+	s.mux.Lock()
+	s.keys = append(s.keys, key)
+	s.mux.Unlock()
+
+	log.Printf("%s was added to slot: %d", key, slotIndex)
+}
+
 func (rl *RateLimiter) Cleanup(ctx context.Context) {
 	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
@@ -93,11 +101,30 @@ func (rl *RateLimiter) Cleanup(ctx context.Context) {
 			log.Println("Exit Cleanup")
 			return
 		case <-ticker.C:
-			/*now := time.Now()
-			currentTick := rl.wheel.cur
-			slotIndex := currentTick % wheelSize
+
+			now := time.Now()
+			slotIndex := (time.Now().Unix() + 1) % wheelSize
+			log.Printf("Cleanup tick: %d", slotIndex)
+
 			s := rl.wheel.slots[slotIndex]
 			s.mux.Lock()
+			for _, key := range s.keys {
+				tb, ok := rl.entries.Load(key)
+				v, ok := tb.(*tokenBucket)
+				if !ok {
+					rl.entries.Delete(key)
+					continue
+				}
+				v.mux.Lock()
+				diff := now.Sub(v.expireAt)
+				v.mux.Unlock()
+				if diff.Seconds() > 0 {
+					rl.entries.Delete(key)
+				}
+			}
+			s.keys = make([]string, 0)
+			s.mux.Unlock()
+			/*s.mux.Lock()
 
 			for _, key := range s.keys {
 				tb, ok := rl.entries.Load(key)
