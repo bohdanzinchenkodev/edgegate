@@ -3,6 +3,7 @@ package egproxy
 import (
 	"context"
 	"edgegate/internal/config"
+	"edgegate/internal/ratelimit"
 	"errors"
 	"log"
 	"net"
@@ -25,6 +26,7 @@ type proxyServer struct {
 	server *http.Server
 	done   chan struct{}
 	router *listenerRouter
+	rl     *ratelimit.RateLimiter
 }
 
 type listenerRouter struct {
@@ -32,7 +34,7 @@ type listenerRouter struct {
 	current atomic.Value // stores *compiledListener
 }
 
-func newListenerRouter(initial *compiledListener) *listenerRouter {
+func newListenerRouter(initial http.Handler) *listenerRouter {
 	lr := &listenerRouter{}
 	lr.current.Store(initial)
 	return lr
@@ -43,8 +45,8 @@ func (lr *listenerRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cl.ServeHTTP(w, r)
 }
 
-func (lr *listenerRouter) Update(newCL *compiledListener) {
-	lr.current.Store(newCL)
+func (lr *listenerRouter) Update(h http.Handler) {
+	lr.current.Store(h)
 }
 
 type compiledListener struct {
@@ -139,8 +141,8 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 		toStart  []*proxyServer
 		toStop   []*proxyServer
 		toUpdate []struct {
-			ps *proxyServer
-			cl *compiledListener
+			ps      *proxyServer
+			handler http.Handler
 		}
 	)
 
@@ -150,21 +152,27 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 	for addr, cl := range newCompiled {
 		if ps, exists := servers[addr]; exists {
 			toUpdate = append(toUpdate, struct {
-				ps *proxyServer
-				cl *compiledListener
-			}{ps: ps, cl: cl})
+				ps      *proxyServer
+				handler http.Handler
+			}{ps: ps, handler: ps.rl.AllowReqMiddleware(cl)})
 		} else {
-			router := newListenerRouter(cl)
+			//create rate limiter
+			rl := ratelimit.NewRateLimiter(10, 1, 1)
+			//wrap cl into rate limiter middleware
+			handler := rl.AllowReqMiddleware(cl)
+			//register the result handler into router
+			router := newListenerRouter(handler)
 
 			srv := &http.Server{
 				Addr:    addr,
-				Handler: router,
+				Handler: handler,
 			}
 
 			ps := &proxyServer{
 				server: srv,
 				done:   make(chan struct{}),
 				router: router,
+				rl:     rl,
 			}
 
 			servers[addr] = ps
@@ -184,7 +192,7 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 
 	// 3) perform actions outside global lock
 	for _, upd := range toUpdate {
-		upd.ps.router.Update(upd.cl)
+		upd.ps.router.Update(upd.handler)
 	}
 
 	for _, ps := range toStart {
@@ -198,6 +206,12 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 
 func startServer(ps *proxyServer) {
 	log.Printf("Starting server on %v\n", ps.server.Addr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go ps.rl.Cleanup(ctx)
+	//when a server shuts down, it will exit the scope of the function
+	//as the result cancel() will trigger ctx.Done() which will exit cleanup function loop
+	defer cancel()
 
 	err := ps.server.ListenAndServe()
 	close(ps.done)
