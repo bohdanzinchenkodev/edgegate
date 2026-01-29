@@ -12,15 +12,16 @@ const (
 	deleteAfter = 10 * time.Second //delete entries unused for 300 seconds
 	wheelSize   = 10               //number of slots in the wheel
 )
-const cleanupInterval = 1 * time.Second
+const defaultCleanupInterval = 1 * time.Second
 
 type RateLimiter struct {
-	entries    sync.Map
-	capacity   int
-	refillRate int
-	usageRate  int
-	mux        sync.Mutex
-	wheel      wheel
+	entries         sync.Map
+	capacity        int
+	refillRate      int
+	usageRate       int
+	mux             sync.Mutex
+	wheel           wheel
+	cleanupInterval time.Duration
 }
 
 type wheel struct {
@@ -32,17 +33,18 @@ type slot struct {
 	mux  sync.Mutex
 }
 
-func NewRateLimiter(capacity, refillRate, usageRate int) *RateLimiter {
+func NewRateLimiter(capacity, refillRate, usageRate int, cleanupInterval time.Duration) *RateLimiter {
 	slots := make([]*slot, wheelSize)
 	for i := range slots {
 		slots[i] = &slot{}
 	}
 	return &RateLimiter{
-		entries:    sync.Map{},
-		capacity:   capacity,
-		refillRate: refillRate,
-		usageRate:  usageRate,
-		wheel:      wheel{slots: slots},
+		entries:         sync.Map{},
+		capacity:        capacity,
+		refillRate:      refillRate,
+		usageRate:       usageRate,
+		wheel:           wheel{slots: slots},
+		cleanupInterval: cleanupInterval,
 	}
 }
 func (rl *RateLimiter) AllowReqMiddleware(next http.Handler) http.Handler {
@@ -92,8 +94,15 @@ func (rl *RateLimiter) addToWheel(key string) {
 	log.Printf("%s was added to slot: %d", key, slotIndex)
 }
 
-func (rl *RateLimiter) Cleanup(ctx context.Context) {
-	ticker := time.NewTicker(cleanupInterval)
+func (rl *RateLimiter) Cleanup(ctx context.Context, cleanupOnStart bool) {
+	if cleanupOnStart {
+		log.Println("Performing initial cleanup")
+		rl.cleanupTick()
+	}
+	if rl.cleanupInterval == 0 {
+		rl.cleanupInterval = defaultCleanupInterval
+	}
+	ticker := time.NewTicker(rl.cleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -101,49 +110,33 @@ func (rl *RateLimiter) Cleanup(ctx context.Context) {
 			log.Println("Exit Cleanup")
 			return
 		case <-ticker.C:
-
-			now := time.Now()
-			slotIndex := (time.Now().Unix() + 1) % wheelSize
-			log.Printf("Cleanup tick: %d", slotIndex)
-
-			s := rl.wheel.slots[slotIndex]
-			s.mux.Lock()
-			for _, key := range s.keys {
-				tb, ok := rl.entries.Load(key)
-				v, ok := tb.(*tokenBucket)
-				if !ok {
-					rl.entries.Delete(key)
-					continue
-				}
-				v.mux.Lock()
-				diff := now.Sub(v.expireAt)
-				v.mux.Unlock()
-				if diff.Seconds() > 0 {
-					rl.entries.Delete(key)
-				}
-			}
-			s.keys = make([]string, 0)
-			s.mux.Unlock()
-			/*s.mux.Lock()
-
-			for _, key := range s.keys {
-				tb, ok := rl.entries.Load(key)
-				v, ok := tb.(*tokenBucket)
-				if !ok {
-					rl.entries.Delete(key)
-					continue
-				}
-
-				diff := now.Sub(v.expireAt)
-				if diff.Seconds() > 0 {
-					rl.entries.Delete(key)
-				}
-			}
-			rl.wheel.slots = make([]*slot, 0)
-			rl.wheel.cur++
-			s.mux.Unlock()*/
+			rl.cleanupTick()
 		}
 	}
+}
+func (rl *RateLimiter) cleanupTick() {
+	now := time.Now()
+	slotIndex := (time.Now().Unix() + 1) % wheelSize
+	log.Printf("Cleanup tick: %d", slotIndex)
+
+	s := rl.wheel.slots[slotIndex]
+	s.mux.Lock()
+	for _, key := range s.keys {
+		tb, ok := rl.entries.Load(key)
+		v, ok := tb.(*tokenBucket)
+		if !ok {
+			rl.entries.Delete(key)
+			continue
+		}
+		v.mux.Lock()
+		diff := now.Sub(v.expireAt)
+		v.mux.Unlock()
+		if diff.Seconds() > 0 {
+			rl.entries.Delete(key)
+		}
+	}
+	s.keys = make([]string, 0)
+	s.mux.Unlock()
 }
 
 type tokenBucket struct {
@@ -167,7 +160,7 @@ func newTokenBucket(capacity, refillRate int) *tokenBucket {
 func (tb *tokenBucket) take(tokens int) bool {
 	tb.mux.Lock()
 	defer tb.mux.Unlock()
-	/*tb.refill()*/
+	tb.refill()
 
 	if tb.tokens < tokens {
 		return false
