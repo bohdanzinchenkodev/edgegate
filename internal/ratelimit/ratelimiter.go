@@ -8,6 +8,17 @@ import (
 	"time"
 )
 
+type clock interface {
+	Now() time.Time
+}
+type realClock struct {
+	now time.Time
+}
+
+func (rc *realClock) Now() time.Time {
+	return time.Now()
+}
+
 type RateLimiter struct {
 	entries         sync.Map
 	capacity        int
@@ -18,6 +29,7 @@ type RateLimiter struct {
 	cleanupInterval time.Duration
 	deleteAfter     time.Duration
 	wheelSize       int
+	clock           clock
 }
 type RateLimiterOption struct {
 	Capacity        int
@@ -26,6 +38,7 @@ type RateLimiterOption struct {
 	CleanupInterval time.Duration
 	DeleteAfter     time.Duration
 	WheelSize       int
+	Clock           clock
 }
 
 type wheel struct {
@@ -42,6 +55,9 @@ func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
 	for i := range slots {
 		slots[i] = &slot{}
 	}
+	if rlOptions.Clock == nil {
+		rlOptions.Clock = &realClock{}
+	}
 	return &RateLimiter{
 		entries:         sync.Map{},
 		capacity:        rlOptions.Capacity,
@@ -51,6 +67,7 @@ func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
 		cleanupInterval: rlOptions.CleanupInterval,
 		wheelSize:       rlOptions.WheelSize,
 		deleteAfter:     rlOptions.DeleteAfter,
+		clock:           rlOptions.Clock,
 	}
 }
 func (rl *RateLimiter) AllowReqMiddleware(next http.Handler) http.Handler {
@@ -66,7 +83,7 @@ func (rl *RateLimiter) AllowReqMiddleware(next http.Handler) http.Handler {
 func (rl *RateLimiter) AllowReq(key string) bool {
 	tb, ok := rl.entries.Load(key)
 	if !ok {
-		tb = newTokenBucket(rl.capacity, rl.refillRate)
+		tb = newTokenBucket(rl.capacity, rl.refillRate, rl.clock)
 		tb, _ = rl.entries.LoadOrStore(key, tb)
 	}
 	v, ok := tb.(*tokenBucket)
@@ -77,7 +94,7 @@ func (rl *RateLimiter) AllowReq(key string) bool {
 
 	//set expiry date for bucket
 	v.mux.Lock()
-	v.expireAt = time.Now().Add(rl.deleteAfter)
+	v.expireAt = rl.clock.Now().Add(rl.deleteAfter)
 	v.mux.Unlock()
 
 	// Add to wheel slot
@@ -87,7 +104,7 @@ func (rl *RateLimiter) AllowReq(key string) bool {
 }
 
 func (rl *RateLimiter) addToWheel(key string) {
-	currentTick := time.Now().Unix()
+	currentTick := rl.clock.Now().Unix()
 	da := int64(rl.deleteAfter.Seconds())
 	//ex: (531 + 300) % 300 = 231
 	slotIndex := (currentTick + da) % int64(rl.wheelSize)
@@ -100,15 +117,7 @@ func (rl *RateLimiter) addToWheel(key string) {
 	log.Printf("%s was added to slot: %d", key, slotIndex)
 }
 
-func (rl *RateLimiter) Cleanup(ctx context.Context, cleanupOnStart bool) {
-	if cleanupOnStart {
-		log.Println("Performing initial cleanup")
-		rl.cleanupTick()
-	}
-	if rl.cleanupInterval == 0 {
-		log.Println("Cleanup interval is 0, skipping cleanup routine")
-		return
-	}
+func (rl *RateLimiter) Cleanup(ctx context.Context) {
 	ticker := time.NewTicker(rl.cleanupInterval)
 	defer ticker.Stop()
 	for {
@@ -122,12 +131,13 @@ func (rl *RateLimiter) Cleanup(ctx context.Context, cleanupOnStart bool) {
 	}
 }
 func (rl *RateLimiter) cleanupTick() {
-	now := time.Now()
-	slotIndex := (time.Now().Unix() + 1) % int64(rl.wheelSize)
+	now := rl.clock.Now()
+	slotIndex := (now.Unix() + 1) % int64(rl.wheelSize)
 	log.Printf("Cleanup tick: %d", slotIndex)
 
 	s := rl.wheel.slots[slotIndex]
 	s.mux.Lock()
+	survivedKeys := make([]string, 0)
 	for _, key := range s.keys {
 		tb, ok := rl.entries.Load(key)
 		v, ok := tb.(*tokenBucket)
@@ -138,11 +148,13 @@ func (rl *RateLimiter) cleanupTick() {
 		v.mux.Lock()
 		diff := now.Sub(v.expireAt)
 		v.mux.Unlock()
-		if diff.Seconds() > 0 {
+		if diff.Seconds() >= 0 {
 			rl.entries.Delete(key)
+			continue
 		}
+		survivedKeys = append(survivedKeys, key)
 	}
-	s.keys = make([]string, 0)
+	s.keys = survivedKeys
 	s.mux.Unlock()
 }
 
@@ -153,14 +165,16 @@ type tokenBucket struct {
 	lastRefill time.Time
 	mux        sync.Mutex
 	expireAt   time.Time
+	clock      clock
 }
 
-func newTokenBucket(capacity, refillRate int) *tokenBucket {
+func newTokenBucket(capacity, refillRate int, c clock) *tokenBucket {
 	tb := &tokenBucket{
 		capacity:   capacity,
 		tokens:     capacity,
 		refillRate: refillRate,
 		lastRefill: time.Now(),
+		clock:      c,
 	}
 	return tb
 }
@@ -177,7 +191,7 @@ func (tb *tokenBucket) take(tokens int) bool {
 	return true
 }
 func (tb *tokenBucket) refill() {
-	now := time.Now()
+	now := tb.clock.Now()
 	elapsed := now.Sub(tb.lastRefill)
 
 	tokensToAdd := int(elapsed.Seconds()) * tb.refillRate
