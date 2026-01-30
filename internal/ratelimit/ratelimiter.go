@@ -8,12 +8,6 @@ import (
 	"time"
 )
 
-const (
-	deleteAfter = 10 * time.Second //delete entries unused for 300 seconds
-	wheelSize   = 10               //number of slots in the wheel
-)
-const defaultCleanupInterval = 1 * time.Second
-
 type RateLimiter struct {
 	entries         sync.Map
 	capacity        int
@@ -22,6 +16,16 @@ type RateLimiter struct {
 	mux             sync.Mutex
 	wheel           wheel
 	cleanupInterval time.Duration
+	deleteAfter     time.Duration
+	wheelSize       int
+}
+type RateLimiterOption struct {
+	Capacity        int
+	RefillRate      int
+	UsageRate       int
+	CleanupInterval time.Duration
+	DeleteAfter     time.Duration
+	WheelSize       int
 }
 
 type wheel struct {
@@ -33,18 +37,20 @@ type slot struct {
 	mux  sync.Mutex
 }
 
-func NewRateLimiter(capacity, refillRate, usageRate int, cleanupInterval time.Duration) *RateLimiter {
-	slots := make([]*slot, wheelSize)
+func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
+	slots := make([]*slot, rlOptions.WheelSize)
 	for i := range slots {
 		slots[i] = &slot{}
 	}
 	return &RateLimiter{
 		entries:         sync.Map{},
-		capacity:        capacity,
-		refillRate:      refillRate,
-		usageRate:       usageRate,
+		capacity:        rlOptions.Capacity,
+		refillRate:      rlOptions.RefillRate,
+		usageRate:       rlOptions.UsageRate,
 		wheel:           wheel{slots: slots},
-		cleanupInterval: cleanupInterval,
+		cleanupInterval: rlOptions.CleanupInterval,
+		wheelSize:       rlOptions.WheelSize,
+		deleteAfter:     rlOptions.DeleteAfter,
 	}
 }
 func (rl *RateLimiter) AllowReqMiddleware(next http.Handler) http.Handler {
@@ -71,7 +77,7 @@ func (rl *RateLimiter) AllowReq(key string) bool {
 
 	//set expiry date for bucket
 	v.mux.Lock()
-	v.expireAt = time.Now().Add(deleteAfter)
+	v.expireAt = time.Now().Add(rl.deleteAfter)
 	v.mux.Unlock()
 
 	// Add to wheel slot
@@ -82,9 +88,9 @@ func (rl *RateLimiter) AllowReq(key string) bool {
 
 func (rl *RateLimiter) addToWheel(key string) {
 	currentTick := time.Now().Unix()
-	da := int64(deleteAfter.Seconds())
+	da := int64(rl.deleteAfter.Seconds())
 	//ex: (531 + 300) % 300 = 231
-	slotIndex := (currentTick + da) % wheelSize
+	slotIndex := (currentTick + da) % int64(rl.wheelSize)
 	s := rl.wheel.slots[slotIndex]
 
 	s.mux.Lock()
@@ -100,7 +106,8 @@ func (rl *RateLimiter) Cleanup(ctx context.Context, cleanupOnStart bool) {
 		rl.cleanupTick()
 	}
 	if rl.cleanupInterval == 0 {
-		rl.cleanupInterval = defaultCleanupInterval
+		log.Println("Cleanup interval is 0, skipping cleanup routine")
+		return
 	}
 	ticker := time.NewTicker(rl.cleanupInterval)
 	defer ticker.Stop()
@@ -116,7 +123,7 @@ func (rl *RateLimiter) Cleanup(ctx context.Context, cleanupOnStart bool) {
 }
 func (rl *RateLimiter) cleanupTick() {
 	now := time.Now()
-	slotIndex := (time.Now().Unix() + 1) % wheelSize
+	slotIndex := (time.Now().Unix() + 1) % int64(rl.wheelSize)
 	log.Printf("Cleanup tick: %d", slotIndex)
 
 	s := rl.wheel.slots[slotIndex]
