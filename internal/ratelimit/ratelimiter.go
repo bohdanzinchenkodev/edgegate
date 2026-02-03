@@ -128,6 +128,18 @@ func (rl *RateLimiter) addToWheel(key string) {
 
 	log.Printf("%s was added to slot: %d", key, slotIndex)
 }
+func (rl *RateLimiter) StartCleanup(parent context.Context) {
+	ctx, cancel := context.WithCancel(parent)
+	rl.cancelCleanup = cancel
+
+	go rl.cleanup(ctx)
+}
+
+func (rl *RateLimiter) Close() {
+	if rl.cancelCleanup != nil {
+		rl.cancelCleanup()
+	}
+}
 func (rl *RateLimiter) cleanup(ctx context.Context) {
 	ticker := time.NewTicker(rl.cleanupInterval)
 	defer ticker.Stop()
@@ -151,6 +163,9 @@ func (rl *RateLimiter) cleanupTick() {
 	survivedKeys := make([]string, 0)
 	for _, key := range s.keys {
 		tb, ok := rl.entries.Load(key)
+		if !ok {
+			continue
+		}
 		v, ok := tb.(*tokenBucket)
 		if !ok {
 			rl.entries.Delete(key)
