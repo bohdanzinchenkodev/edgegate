@@ -156,8 +156,16 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 				handler http.Handler
 			}{ps: ps, handler: ps.rl.AllowReqMiddleware(cl)})
 		} else {
+			o := ratelimit.RateLimiterOption{
+				Capacity:        10,
+				RefillRate:      1,
+				UsageRate:       1,
+				WheelSize:       10,
+				CleanupInterval: 1 * time.Second,
+				DeleteAfter:     1 * time.Minute,
+			}
 			//create rate limiter
-			rl := ratelimit.NewRateLimiter(10, 1, 1, 1*time.Second)
+			rl := ratelimit.NewRateLimiter(o)
 			//wrap cl into rate limiter middleware
 			handler := rl.AllowReqMiddleware(cl)
 			//register the result handler into router
@@ -208,10 +216,8 @@ func startServer(ps *proxyServer) {
 	log.Printf("Starting server on %v\n", ps.server.Addr)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go ps.rl.Cleanup(ctx, false)
-	//when a server shuts down, it will exit the scope of the function
-	//as the result cancel() will trigger ctx.Done() which will exit cleanup function loop
 	defer cancel()
+	ps.rl.StartCleanup(ctx)
 
 	err := ps.server.ListenAndServe()
 	close(ps.done)
