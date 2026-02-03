@@ -3,7 +3,10 @@ package ratelimit
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,6 +33,8 @@ type RateLimiter struct {
 	deleteAfter     time.Duration
 	wheelSize       int
 	clock           clock
+	trustedProxies  []string
+	cancelCleanup   context.CancelFunc
 }
 type RateLimiterOption struct {
 	Capacity        int
@@ -39,6 +44,7 @@ type RateLimiterOption struct {
 	DeleteAfter     time.Duration
 	WheelSize       int
 	Clock           clock
+	TrustedProxies  []string
 }
 
 type wheel struct {
@@ -68,11 +74,17 @@ func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
 		wheelSize:       rlOptions.WheelSize,
 		deleteAfter:     rlOptions.DeleteAfter,
 		clock:           rlOptions.Clock,
+		trustedProxies:  rlOptions.TrustedProxies,
 	}
 }
 func (rl *RateLimiter) AllowReqMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := r.RemoteAddr //keep it simple for now
+		key, err := rl.resolveIp(r)
+		if err != nil {
+			http.Error(w, "cannot resolve IP", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Resolved key: %s", key)
 		if !rl.AllowReq(key) {
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
@@ -116,8 +128,7 @@ func (rl *RateLimiter) addToWheel(key string) {
 
 	log.Printf("%s was added to slot: %d", key, slotIndex)
 }
-
-func (rl *RateLimiter) Cleanup(ctx context.Context) {
+func (rl *RateLimiter) cleanup(ctx context.Context) {
 	ticker := time.NewTicker(rl.cleanupInterval)
 	defer ticker.Stop()
 	for {
@@ -156,6 +167,59 @@ func (rl *RateLimiter) cleanupTick() {
 	}
 	s.keys = survivedKeys
 	s.mux.Unlock()
+}
+func (rl *RateLimiter) resolveIp(r *http.Request) (string, error) {
+
+	//get ip without port
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	//validate ip and parse to netip.Addr
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		log.Printf("Invalid IP address %s: %v", ip, err)
+		return "", err
+	}
+
+	if len(rl.trustedProxies) == 0 {
+		return addr.StringExpanded(), nil
+	}
+
+	if isIPInTrustedProxyRanges(addr, rl.trustedProxies) {
+		// Check X-Real-Ip and X-Forwarded-For headers
+		xRealIp := r.Header.Get("X-Real-Ip")
+		//validate xRealIp
+		xRealAddr, err := netip.ParseAddr(xRealIp)
+		if err == nil {
+			return xRealAddr.StringExpanded(), nil
+		}
+
+		xForwardedFor := r.Header.Get("X-Forwarded-For")
+		ips := strings.Split(xForwardedFor, ",")
+		if len(ips) > 0 {
+			//get first ip
+			xForwardedIp := strings.TrimSpace(ips[0])
+			//validate xForwardedIp
+			xForwardedAddr, err := netip.ParseAddr(xForwardedIp)
+			if err == nil {
+				return xForwardedAddr.StringExpanded(), nil
+			}
+		}
+	}
+	//return remote addr if no valid headers found
+	return addr.StringExpanded(), nil
+}
+
+func isIPInTrustedProxyRanges(addr netip.Addr, trustedProxies []string) bool {
+	for _, proxyRange := range trustedProxies {
+		prefix, err := netip.ParsePrefix(proxyRange)
+		if err != nil {
+			log.Printf("Invalid proxy range %s: %v", proxyRange, err)
+			continue
+		}
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 type tokenBucket struct {
