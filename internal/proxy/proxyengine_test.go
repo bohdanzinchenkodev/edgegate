@@ -98,7 +98,7 @@ func TestApplyConfig_NewListener_StartsMiddlewares(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	ps.server.Shutdown(ctx)
+	_ = ps.server.Shutdown(ctx)
 
 	for _, mw := range ps.middlewares {
 		mw.ServerShutdown()
