@@ -64,6 +64,14 @@ func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
 	if rlOptions.Clock == nil {
 		rlOptions.Clock = &realClock{}
 	}
+	log.Printf("RateLimiter created with capacity: %d, refillRate: %d, usageRate: %d, wheelSize: %d, deleteAfter: %s, cleanupInterval: %s\n",
+		rlOptions.Capacity,
+		rlOptions.RefillRate,
+		rlOptions.UsageRate,
+		rlOptions.WheelSize,
+		rlOptions.DeleteAfter.String(),
+		rlOptions.CleanupInterval.String(),
+	)
 	return &RateLimiter{
 		entries:         sync.Map{},
 		capacity:        rlOptions.Capacity,
@@ -141,6 +149,7 @@ func (rl *RateLimiter) WrapHandler(next http.Handler) http.Handler {
 	})
 }
 func (rl *RateLimiter) cleanup(ctx context.Context) {
+	log.Println("Start Cleanup")
 	ticker := time.NewTicker(rl.cleanupInterval)
 	defer ticker.Stop()
 	for {

@@ -102,18 +102,24 @@ func compileListener(l config.Listener) (*compiledListener, error) {
 			proxy:      p,
 		})
 	}
-	o := ratelimit.RateLimiterOption{
-		Capacity:        10,
-		RefillRate:      1,
-		UsageRate:       1,
-		WheelSize:       10,
-		CleanupInterval: 1 * time.Second,
-		DeleteAfter:     1 * time.Minute,
-	}
+	// Rate limiter middleware
+	//If it isn't present, no rate limiting is applied
+	if l.RateLimit.Enabled {
 
-	//create rate limiter
-	rl := ratelimit.NewRateLimiter(o)
-	cl.middlewares = append(cl.middlewares, rl)
+		refillRate := float64(l.RateLimit.Requests) / l.RateLimit.Window.Seconds()
+		o := ratelimit.RateLimiterOption{
+			Capacity:        l.RateLimit.Requests,
+			RefillRate:      int(refillRate),
+			TrustedProxies:  l.RateLimit.TrustedProxies,
+			UsageRate:       1, //1 request per token
+			WheelSize:       int(l.RateLimit.ClientTTL.Seconds()),
+			CleanupInterval: 1 * time.Second, //cleanup every second
+			DeleteAfter:     l.RateLimit.ClientTTL,
+		}
+		//create rate limiter
+		rl := ratelimit.NewRateLimiter(o)
+		cl.middlewares = append(cl.middlewares, rl)
+	}
 
 	return cl, nil
 }
