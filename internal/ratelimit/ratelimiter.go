@@ -77,21 +77,6 @@ func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
 		trustedProxies:  rlOptions.TrustedProxies,
 	}
 }
-func (rl *RateLimiter) AllowReqMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key, err := rl.resolveIp(r)
-		if err != nil {
-			http.Error(w, "cannot resolve IP", http.StatusInternalServerError)
-			return
-		}
-		log.Printf("Resolved key: %s", key)
-		if !rl.AllowReq(key) {
-			http.Error(w, "too many requests", http.StatusTooManyRequests)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
 func (rl *RateLimiter) AllowReq(key string) bool {
 	tb, ok := rl.entries.Load(key)
 	if !ok {
@@ -128,17 +113,32 @@ func (rl *RateLimiter) addToWheel(key string) {
 
 	log.Printf("%s was added to slot: %d", key, slotIndex)
 }
-func (rl *RateLimiter) StartCleanup(parent context.Context) {
-	ctx, cancel := context.WithCancel(parent)
+func (rl *RateLimiter) ServerStart(ctx context.Context) {
+	cleanupCtx, cancel := context.WithCancel(ctx)
 	rl.cancelCleanup = cancel
 
-	go rl.cleanup(ctx)
+	go rl.cleanup(cleanupCtx)
 }
 
-func (rl *RateLimiter) Close() {
+func (rl *RateLimiter) ServerShutdown() {
 	if rl.cancelCleanup != nil {
 		rl.cancelCleanup()
 	}
+}
+func (rl *RateLimiter) WrapHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key, err := rl.resolveIp(r)
+		if err != nil {
+			http.Error(w, "cannot resolve IP", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Resolved key: %s", key)
+		if !rl.AllowReq(key) {
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 func (rl *RateLimiter) cleanup(ctx context.Context) {
 	ticker := time.NewTicker(rl.cleanupInterval)
@@ -156,7 +156,6 @@ func (rl *RateLimiter) cleanup(ctx context.Context) {
 func (rl *RateLimiter) cleanupTick() {
 	now := rl.clock.Now()
 	slotIndex := (now.Unix() + 1) % int64(rl.wheelSize)
-	log.Printf("Cleanup tick: %d", slotIndex)
 
 	s := rl.wheel.slots[slotIndex]
 	s.mux.Lock()

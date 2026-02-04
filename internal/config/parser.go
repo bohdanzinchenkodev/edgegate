@@ -11,14 +11,14 @@ type ReverseProxyConfig struct {
 }
 type Listener struct {
 	Listen    string          `yaml:"listen"`
-	Routes    []route         `yaml:"routes"`
+	Routes    []Route         `yaml:"routes"`
 	RateLimit rateLimitPolicy `yaml:"rate_limit"`
 }
-type route struct {
-	Match    match  `yaml:"match"`
+type Route struct {
+	Match    Match  `yaml:"match"`
 	Upstream string `yaml:"upstream"`
 }
-type match struct {
+type Match struct {
 	PathPrefix string `yaml:"path_prefix"`
 	Host       string `yaml:"host"`
 }
