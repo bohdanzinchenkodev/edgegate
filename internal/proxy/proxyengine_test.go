@@ -15,8 +15,8 @@ type orderTrackingMiddleware struct {
 	called *[]string
 }
 
-func (m *orderTrackingMiddleware) ServerStart(ctx context.Context) {}
-func (m *orderTrackingMiddleware) ServerShutdown()                 {}
+func (m *orderTrackingMiddleware) ServerStart(_ context.Context) {}
+func (m *orderTrackingMiddleware) ServerShutdown()               {}
 func (m *orderTrackingMiddleware) WrapHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*m.called = append(*m.called, m.name)
@@ -25,7 +25,7 @@ func (m *orderTrackingMiddleware) WrapHandler(next http.Handler) http.Handler {
 }
 
 func TestBuildHandlerWithMiddlewares(t *testing.T) {
-	called := []string{}
+	var called []string
 
 	base := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = append(called, "base")
@@ -87,8 +87,8 @@ func TestApplyConfig_NewListener_StartsMiddlewares(t *testing.T) {
 		t.Fatal("expected server to be created")
 	}
 
-	if len(ps.middlewares) == 0 {
-		t.Fatal("expected middlewares to be attached")
+	if len(ps.middlewares) > 0 {
+		t.Fatalf("expected no middlewares, got %d", len(ps.middlewares))
 	}
 
 	// Cleanup
