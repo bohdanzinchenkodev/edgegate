@@ -69,9 +69,7 @@ func (fw *FileWatcher) Watch(ctx context.Context) {
 			} else if fileData != nil {
 				select {
 				case fw.bytesCh <- fileData:
-					log.Println("fw.bytesCh <- fileData")
 				default:
-					log.Println("default")
 				}
 			}
 		}
