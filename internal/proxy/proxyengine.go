@@ -109,7 +109,7 @@ func compileListener(l config.Listener) (*compiledListener, error) {
 		refillRate := float64(l.RateLimit.Requests) / l.RateLimit.Window.Seconds()
 		o := ratelimit.RateLimiterOption{
 			Capacity:        l.RateLimit.Requests,
-			RefillRate:      int(refillRate),
+			RefillRate:      refillRate,
 			TrustedProxies:  l.RateLimit.TrustedProxies,
 			UsageRate:       1, //1 request per token
 			WheelSize:       int(l.RateLimit.ClientTTL.Seconds()),

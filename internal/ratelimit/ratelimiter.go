@@ -25,7 +25,7 @@ func (rc *realClock) Now() time.Time {
 type RateLimiter struct {
 	entries         sync.Map
 	capacity        int
-	refillRate      int
+	refillRate      float64
 	usageRate       int
 	mux             sync.Mutex
 	wheel           wheel
@@ -38,7 +38,7 @@ type RateLimiter struct {
 }
 type RateLimiterOption struct {
 	Capacity        int
-	RefillRate      int
+	RefillRate      float64
 	UsageRate       int
 	CleanupInterval time.Duration
 	DeleteAfter     time.Duration
@@ -64,7 +64,7 @@ func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
 	if rlOptions.Clock == nil {
 		rlOptions.Clock = &realClock{}
 	}
-	log.Printf("RateLimiter created with capacity: %d, refillRate: %d, usageRate: %d, wheelSize: %d, deleteAfter: %s, cleanupInterval: %s\n",
+	log.Printf("RateLimiter created with capacity: %d, refillRate: %.2f, usageRate: %d, wheelSize: %d, deleteAfter: %s, cleanupInterval: %s\n",
 		rlOptions.Capacity,
 		rlOptions.RefillRate,
 		rlOptions.UsageRate,
@@ -247,18 +247,18 @@ func isIPInTrustedProxyRanges(addr netip.Addr, trustedProxies []string) bool {
 
 type tokenBucket struct {
 	capacity   int
-	tokens     int
-	refillRate int // tokens per second
+	tokens     float64 // current tokens (float to accumulate fractions)
+	refillRate float64 // tokens per second
 	lastRefill time.Time
 	mux        sync.Mutex
 	expireAt   time.Time
 	clock      clock
 }
 
-func newTokenBucket(capacity, refillRate int, c clock) *tokenBucket {
+func newTokenBucket(capacity int, refillRate float64, c clock) *tokenBucket {
 	tb := &tokenBucket{
 		capacity:   capacity,
-		tokens:     capacity,
+		tokens:     float64(capacity),
 		refillRate: refillRate,
 		lastRefill: time.Now(),
 		clock:      c,
@@ -270,21 +270,17 @@ func (tb *tokenBucket) take(tokens int) bool {
 	defer tb.mux.Unlock()
 	tb.refill()
 
-	if tb.tokens < tokens {
+	if tb.tokens < float64(tokens) {
 		return false
 	}
 
-	tb.tokens -= tokens
+	tb.tokens -= float64(tokens)
 	return true
 }
 func (tb *tokenBucket) refill() {
 	now := tb.clock.Now()
 	elapsed := now.Sub(tb.lastRefill)
-
-	tokensToAdd := int(elapsed.Seconds()) * tb.refillRate
 	tb.lastRefill = now
-	if tokensToAdd == 0 {
-		return
-	}
-	tb.tokens = min(tokensToAdd+tb.tokens, tb.capacity)
+
+	tb.tokens = min(tb.tokens+elapsed.Seconds()*tb.refillRate, float64(tb.capacity))
 }
