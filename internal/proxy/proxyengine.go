@@ -20,6 +20,7 @@ import (
 var (
 	mu      sync.Mutex
 	servers = map[string]*proxyServer{}
+	currCfg = config.ReverseProxyConfig{}
 )
 
 type proxyServer struct {
@@ -27,6 +28,16 @@ type proxyServer struct {
 	done        chan struct{}
 	router      *listenerRouter
 	middlewares []HandlerMiddleware
+}
+type compareConfigsResult struct {
+	toStop   []*proxyServer
+	toStart  []*proxyServer
+	toUpdate []*toUpdateServer
+}
+type toUpdateServer struct {
+	ps             *proxyServer
+	handler        http.Handler
+	newMiddlewares []HandlerMiddleware
 }
 
 type listenerRouter struct {
@@ -124,6 +135,56 @@ func compileListener(l config.Listener) (*compiledListener, error) {
 	return cl, nil
 }
 
+func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsResult {
+	result := compareConfigsResult{}
+
+	// Build map from old config, keyed by listen address
+	oldMap := make(map[string]config.Listener, len(oldCfg.Listeners))
+	for _, l := range oldCfg.Listeners {
+		oldMap[l.Listen] = l
+	}
+
+	// Iterate new config: find added + updated
+	for _, l := range newCfg.Listeners {
+		cl, err := compileListener(l)
+		if err != nil {
+			log.Print(err)
+			continue
+		}
+
+		ps, exists := servers[l.Listen]
+		if !exists {
+			// New listener — create and mark for start
+			router := newListenerRouter(buildHandlerWithMiddlewares(cl, cl.middlewares))
+			ps = &proxyServer{
+				server:      &http.Server{Addr: l.Listen, Handler: router},
+				done:        make(chan struct{}),
+				router:      router,
+				middlewares: cl.middlewares,
+			}
+			servers[l.Listen] = ps
+			result.toStart = append(result.toStart, ps)
+		} else {
+			// Existing listener — mark for update
+			result.toUpdate = append(result.toUpdate, &toUpdateServer{
+				ps:             ps,
+				handler:        cl,
+				newMiddlewares: cl.middlewares,
+			})
+			delete(oldMap, l.Listen)
+		}
+	}
+
+	// Remaining in oldMap were removed
+	for addr := range oldMap {
+		if ps, exists := servers[addr]; exists {
+			delete(servers, addr)
+			result.toStop = append(result.toStop, ps)
+		}
+	}
+
+	return result
+}
 func StartEngine(ctx context.Context, configPath string) {
 
 	fw := config.NewFileWatcher(configPath)
@@ -147,73 +208,13 @@ func StartEngine(ctx context.Context, configPath string) {
 }
 
 func applyConfig(cfg *config.ReverseProxyConfig) {
-	// 1) compile new listeners (outside lock - no shared state access)
-	newCompiled := make(map[string]*compiledListener, len(cfg.Listeners))
-	for _, l := range cfg.Listeners {
-		cl, err := compileListener(l)
-		if err != nil {
-			log.Print(err)
-			continue
-		}
-		newCompiled[cl.listen] = cl
-	}
 
 	mu.Lock()
 	defer mu.Unlock()
 
-	// 2) decide what to start/update/stop
-	var (
-		toStart  []*proxyServer
-		toStop   []*proxyServer
-		toUpdate []struct {
-			ps             *proxyServer
-			handler        http.Handler
-			newMiddlewares []HandlerMiddleware
-		}
-	)
+	comparisonRes := compareConfigs(&currCfg, cfg)
 
-	// update existing or create new
-	for addr, cl := range newCompiled {
-		if ps, exists := servers[addr]; exists {
-			toUpdate = append(toUpdate, struct {
-				ps             *proxyServer
-				handler        http.Handler
-				newMiddlewares []HandlerMiddleware
-			}{
-				ps:             ps,
-				handler:        cl,
-				newMiddlewares: cl.middlewares,
-			})
-		} else {
-			router := newListenerRouter(buildHandlerWithMiddlewares(cl, cl.middlewares))
-
-			srv := &http.Server{
-				Addr:    addr,
-				Handler: router,
-			}
-
-			ps := &proxyServer{
-				server:      srv,
-				done:        make(chan struct{}),
-				router:      router,
-				middlewares: cl.middlewares,
-			}
-
-			servers[addr] = ps
-			toStart = append(toStart, ps)
-		}
-	}
-
-	// stop removed listeners
-	for addr, ps := range servers {
-		if _, stillExists := newCompiled[addr]; !stillExists {
-			delete(servers, addr)
-			toStop = append(toStop, ps)
-		}
-	}
-
-	// 3) perform updates, starts, stops (all under lock to protect ps.middlewares)
-	for _, upd := range toUpdate {
+	for _, upd := range comparisonRes.toUpdate {
 		// start new middlewares BEFORE making handler live
 		for _, mw := range upd.newMiddlewares {
 			mw.ServerStart(context.Background())
@@ -227,7 +228,7 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 		upd.ps.middlewares = upd.newMiddlewares
 	}
 
-	for _, ps := range toStart {
+	for _, ps := range comparisonRes.toStart {
 		// start middlewares BEFORE server accepts requests
 		for _, mw := range ps.middlewares {
 			mw.ServerStart(context.Background())
@@ -235,7 +236,7 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 		go startServer(ps)
 	}
 
-	for _, ps := range toStop {
+	for _, ps := range comparisonRes.toStop {
 		for _, mw := range ps.middlewares {
 			mw.ServerShutdown()
 		}
