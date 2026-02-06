@@ -154,6 +154,7 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 		ps, exists := servers[l.Listen]
 		if !exists {
 			// New listener — create and mark for start
+			log.Printf("[config] listener %s: added", l.Listen)
 			router := newListenerRouter(buildHandlerWithMiddlewares(cl, middlewares))
 			ps = &proxyServer{
 				server:      &http.Server{Addr: l.Listen, Handler: router},
@@ -169,31 +170,36 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 			if !ok {
 				panic("inconsistent state: listener not found in oldMap")
 			}
+			// Remove from oldMap to mark as processed
+			delete(oldMap, l.Listen)
+
 			var handler http.Handler
-			routesChanged := reflect.DeepEqual(oldListener.Routes, l.Routes)
+			routesChanged := !reflect.DeepEqual(oldListener.Routes, l.Routes)
 			if routesChanged {
+				log.Printf("[config] listener %s: routes changed", l.Listen)
 				handler = cl
 			} else {
 				//if routes didn't change then we reuse old handler (compiledListener)
 				handler = ps.router.current.Load().(http.Handler)
 			}
 			// we want to reuse old middlewares if they are the same (e.g. rate limiter with same config) to avoid unnecessary resets and state loss
-			newMiddlewares, middlewaresChanged := buildNewMiddlewares(middlewares, ps.middlewares)
+			newMiddlewares, middlewaresChanged := buildNewMiddlewares(middlewares, ps.middlewares, l.Listen)
 			if !routesChanged && !middlewaresChanged {
 				continue // no changes, skip
 			}
+			log.Printf("[config] listener %s: updating (routes=%v middlewares=%v)", l.Listen, routesChanged, middlewaresChanged)
 			result.toUpdate = append(result.toUpdate, &toUpdateServer{
 				ps:             ps,
 				handler:        handler,
 				newMiddlewares: newMiddlewares,
 			})
 		}
-		delete(oldMap, l.Listen)
 	}
 
 	// Remaining in oldMap were removed
 	for addr := range oldMap {
 		if ps, exists := servers[addr]; exists {
+			log.Printf("[config] listener %s: removed", addr)
 			delete(servers, addr)
 			result.toStop = append(result.toStop, ps)
 		}
@@ -320,7 +326,7 @@ func buildHandlerWithMiddlewares(base http.Handler, mws []HandlerMiddleware) htt
 	}
 	return http.HandlerFunc(handler.ServeHTTP)
 }
-func buildNewMiddlewares(newMiddlewares, oldMiddlewares []HandlerMiddleware) (res []HandlerMiddleware, changeDetected bool) {
+func buildNewMiddlewares(newMiddlewares, oldMiddlewares []HandlerMiddleware, listenAddr string) (res []HandlerMiddleware, changeDetected bool) {
 	for _, nmw := range newMiddlewares {
 		found := false
 		for _, omw := range oldMiddlewares {
@@ -328,11 +334,12 @@ func buildNewMiddlewares(newMiddlewares, oldMiddlewares []HandlerMiddleware) (re
 				continue
 			}
 
-			if reflect.DeepEqual(nmw, omw) {
+			if omw.Equal(nmw) {
 				//if no changes detected then use old instance
 				res = append(res, omw)
 			} else {
 				//otherwise use new instance
+				log.Printf("[config] listener %s: middleware %T config changed\nold: %s\nnew: %s", listenAddr, nmw, omw, nmw)
 				res = append(res, nmw)
 				changeDetected = true
 			}
@@ -341,6 +348,7 @@ func buildNewMiddlewares(newMiddlewares, oldMiddlewares []HandlerMiddleware) (re
 		}
 		//we didn't find a match in old slice so we just add new mw
 		if !found {
+			log.Printf("[config] listener %s: middleware %T added", listenAddr, nmw)
 			res = append(res, nmw)
 			changeDetected = true
 		}

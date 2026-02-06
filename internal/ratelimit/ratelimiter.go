@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -85,6 +86,40 @@ func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
 		trustedProxies:  rlOptions.TrustedProxies,
 	}
 }
+func (rl *RateLimiter) String() string {
+	return fmt.Sprintf("{capacity:%d refillRate:%.2f usageRate:%d wheelSize:%d deleteAfter:%s cleanupInterval:%s trustedProxies:%v}",
+		rl.capacity, rl.refillRate, rl.usageRate, rl.wheelSize, rl.deleteAfter, rl.cleanupInterval, rl.trustedProxies)
+}
+
+func (rl *RateLimiter) Equal(other any) bool {
+	o, ok := other.(*RateLimiter)
+	if !ok {
+		return false
+	}
+	if rl == nil || o == nil {
+		return rl == o
+	}
+	return rl.capacity == o.capacity &&
+		rl.refillRate == o.refillRate &&
+		rl.usageRate == o.usageRate &&
+		rl.wheelSize == o.wheelSize &&
+		rl.deleteAfter == o.deleteAfter &&
+		rl.cleanupInterval == o.cleanupInterval &&
+		slicesEqual(rl.trustedProxies, o.trustedProxies)
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (rl *RateLimiter) AllowReq(key string) bool {
 	tb, ok := rl.entries.Load(key)
 	if !ok {
