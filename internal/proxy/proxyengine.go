@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,9 +61,7 @@ func (lr *listenerRouter) Update(h http.Handler) {
 }
 
 type compiledListener struct {
-	listen      string
-	routes      []compiledRoute
-	middlewares []HandlerMiddleware
+	routes []compiledRoute
 }
 
 type compiledRoute struct {
@@ -95,8 +94,26 @@ func (cl *compiledListener) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Bad Gateway", http.StatusBadGateway)
 }
 
+func compileMiddlewares(l config.Listener) []HandlerMiddleware {
+	mws := make([]HandlerMiddleware, 0)
+	if l.RateLimit.Enabled {
+		refillRate := float64(l.RateLimit.Requests) / l.RateLimit.Window.Seconds()
+		o := ratelimit.RateLimiterOption{
+			Capacity:        l.RateLimit.Requests,
+			RefillRate:      refillRate,
+			TrustedProxies:  l.RateLimit.TrustedProxies,
+			UsageRate:       1, //1 request per token
+			WheelSize:       int(l.RateLimit.ClientTTL.Seconds()),
+			CleanupInterval: 1 * time.Second, //cleanup every second
+			DeleteAfter:     l.RateLimit.ClientTTL,
+		}
+		rl := ratelimit.NewRateLimiter(o)
+		mws = append(mws, rl)
+	}
+	return mws
+}
 func compileListener(l config.Listener) (*compiledListener, error) {
-	cl := &compiledListener{listen: l.Listen}
+	cl := &compiledListener{}
 	cl.routes = make([]compiledRoute, 0, len(l.Routes))
 
 	for _, r := range l.Routes {
@@ -112,24 +129,6 @@ func compileListener(l config.Listener) (*compiledListener, error) {
 			upstream:   r.Upstream,
 			proxy:      p,
 		})
-	}
-	// Rate limiter middleware
-	//If it isn't present, no rate limiting is applied
-	if l.RateLimit.Enabled {
-
-		refillRate := float64(l.RateLimit.Requests) / l.RateLimit.Window.Seconds()
-		o := ratelimit.RateLimiterOption{
-			Capacity:        l.RateLimit.Requests,
-			RefillRate:      refillRate,
-			TrustedProxies:  l.RateLimit.TrustedProxies,
-			UsageRate:       1, //1 request per token
-			WheelSize:       int(l.RateLimit.ClientTTL.Seconds()),
-			CleanupInterval: 1 * time.Second, //cleanup every second
-			DeleteAfter:     l.RateLimit.ClientTTL,
-		}
-		//create rate limiter
-		rl := ratelimit.NewRateLimiter(o)
-		cl.middlewares = append(cl.middlewares, rl)
 	}
 
 	return cl, nil
@@ -151,28 +150,45 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 			log.Print(err)
 			continue
 		}
-
+		middlewares := compileMiddlewares(l)
 		ps, exists := servers[l.Listen]
 		if !exists {
 			// New listener — create and mark for start
-			router := newListenerRouter(buildHandlerWithMiddlewares(cl, cl.middlewares))
+			router := newListenerRouter(buildHandlerWithMiddlewares(cl, middlewares))
 			ps = &proxyServer{
 				server:      &http.Server{Addr: l.Listen, Handler: router},
 				done:        make(chan struct{}),
 				router:      router,
-				middlewares: cl.middlewares,
+				middlewares: middlewares,
 			}
 			servers[l.Listen] = ps
 			result.toStart = append(result.toStart, ps)
 		} else {
-			// Existing listener — mark for update
+			//check if routes changed
+			oldListener, ok := oldMap[l.Listen]
+			if !ok {
+				panic("inconsistent state: listener not found in oldMap")
+			}
+			var handler http.Handler
+			routesChanged := reflect.DeepEqual(oldListener.Routes, l.Routes)
+			if routesChanged {
+				handler = cl
+			} else {
+				//if routes didn't change then we reuse old handler (compiledListener)
+				handler = ps.router.current.Load().(http.Handler)
+			}
+			// we want to reuse old middlewares if they are the same (e.g. rate limiter with same config) to avoid unnecessary resets and state loss
+			newMiddlewares, middlewaresChanged := buildNewMiddlewares(middlewares, ps.middlewares)
+			if !routesChanged && !middlewaresChanged {
+				continue // no changes, skip
+			}
 			result.toUpdate = append(result.toUpdate, &toUpdateServer{
 				ps:             ps,
-				handler:        cl,
-				newMiddlewares: cl.middlewares,
+				handler:        handler,
+				newMiddlewares: newMiddlewares,
 			})
-			delete(oldMap, l.Listen)
 		}
+		delete(oldMap, l.Listen)
 	}
 
 	// Remaining in oldMap were removed
@@ -242,6 +258,8 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 		}
 		go shutdownServer(ps)
 	}
+
+	currCfg = *cfg
 }
 
 func startServer(ps *proxyServer) {
@@ -301,4 +319,31 @@ func buildHandlerWithMiddlewares(base http.Handler, mws []HandlerMiddleware) htt
 		handler = mws[i].WrapHandler(handler)
 	}
 	return http.HandlerFunc(handler.ServeHTTP)
+}
+func buildNewMiddlewares(newMiddlewares, oldMiddlewares []HandlerMiddleware) (res []HandlerMiddleware, changeDetected bool) {
+	for _, nmw := range newMiddlewares {
+		found := false
+		for _, omw := range oldMiddlewares {
+			if reflect.TypeOf(nmw) != reflect.TypeOf(omw) {
+				continue
+			}
+
+			if reflect.DeepEqual(nmw, omw) {
+				//if no changes detected then use old instance
+				res = append(res, omw)
+			} else {
+				//otherwise use new instance
+				res = append(res, nmw)
+				changeDetected = true
+			}
+			found = true
+			break
+		}
+		//we didn't find a match in old slice so we just add new mw
+		if !found {
+			res = append(res, nmw)
+			changeDetected = true
+		}
+	}
+	return res, changeDetected
 }
