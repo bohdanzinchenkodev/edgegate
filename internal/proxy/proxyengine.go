@@ -7,24 +7,24 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"reflect"
 	"sync"
 	"time"
 )
 
 // Global state for running proxy servers
-// server -> listenerRouter (ServeHTTP) -> compiledListener (ServeHTTP) -> compiledRoute -> proxy (ServeHTTP)
 var (
 	mu      sync.Mutex
 	servers = map[string]*proxyServer{}
 	currCfg = config.ReverseProxyConfig{}
 )
 
+// proxyServer represents a running HTTP server for a specific listener, along with its configuration and state needed for dynamic updates
 type proxyServer struct {
 	server         *http.Server
 	done           chan struct{}
 	handlerWrapper *handlerWrapper
 	middlewares    []HandlerMiddleware
+	router         *proxyRouter
 }
 type compareConfigsResult struct {
 	toStop   []*proxyServer
@@ -32,9 +32,15 @@ type compareConfigsResult struct {
 	toUpdate []*toUpdateServer
 }
 type toUpdateServer struct {
-	ps             *proxyServer
-	handler        http.Handler
-	newMiddlewares []HandlerMiddleware
+	ps        *proxyServer
+	handler   http.Handler
+	mwDiff    middlewareDiff
+	newRouter *proxyRouter
+}
+type middlewareDiff struct {
+	toStop  []HandlerMiddleware
+	toStart []HandlerMiddleware
+	current []HandlerMiddleware // resulting full slice to store
 }
 
 func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsResult {
@@ -64,38 +70,41 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 				done:           make(chan struct{}),
 				handlerWrapper: wrapper,
 				middlewares:    middlewares,
+				router:         pr,
 			}
 			servers[l.Listen] = ps
 			result.toStart = append(result.toStart, ps)
 		} else {
-			//check if routes changed
-			oldListener, ok := oldMap[l.Listen]
-			if !ok {
-				panic("inconsistent state: listener not found in oldMap")
-			}
+
 			// Remove from oldMap to mark as processed
 			delete(oldMap, l.Listen)
 
 			var handler http.Handler
-			routesChanged := !reflect.DeepEqual(oldListener.Routes, l.Routes)
+			var newRouter *proxyRouter
+			// Check if routes changed to decide if we can reuse old router or need to replace with new one
+			routesChanged := !pr.Equal(ps.router)
 			if routesChanged {
 				log.Printf("[config] listener %s: routes changed", l.Listen)
 				handler = pr
+				newRouter = pr
 			} else {
-				//if routes didn't change then we reuse old handler (compiledListener)
-				handler = ps.handlerWrapper.current.Load().(http.Handler) //todo fix. current includes middlewares but we want to reuse compiledListener only.
+				//if routes didn't change then we reuse router
+				handler = ps.router
+				newRouter = ps.router
 			}
 			// we want to reuse old middlewares if they are the same (e.g. rate limiter with the same config) to avoid unnecessary resets and state loss
-			newMiddlewares, middlewaresChanged := buildNewMiddlewares(middlewares, ps.middlewares, l.Listen)
+			diff := buildMiddlewareDiff(middlewares, ps.middlewares, l.Listen)
+			middlewaresChanged := len(diff.toStop) > 0 || len(diff.toStart) > 0
 			if !routesChanged && !middlewaresChanged {
 				log.Printf("[config] listener %s: no changes detected", l.Listen)
 				continue // no changes, skip
 			}
 			log.Printf("[config] listener %s: updating (routes=%v middlewares=%v)", l.Listen, routesChanged, middlewaresChanged)
 			result.toUpdate = append(result.toUpdate, &toUpdateServer{
-				ps:             ps,
-				handler:        handler,
-				newMiddlewares: newMiddlewares,
+				ps:        ps,
+				handler:   handler,
+				mwDiff:    diff,
+				newRouter: newRouter,
 			})
 		}
 	}
@@ -142,16 +151,17 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 
 	for _, upd := range comparisonRes.toUpdate {
 		// start new middlewares BEFORE making handler live
-		for _, mw := range upd.newMiddlewares {
+		for _, mw := range upd.mwDiff.toStart {
 			mw.ServerStart(context.Background())
 		}
-		handler := buildHandlerWithMiddlewares(upd.handler, upd.newMiddlewares)
+		handler := buildHandlerWithMiddlewares(upd.handler, upd.mwDiff.current)
 		upd.ps.handlerWrapper.Update(handler)
 		// shutdown old middlewares AFTER handler is swapped
-		for _, mw := range upd.ps.middlewares {
+		for _, mw := range upd.mwDiff.toStop {
 			mw.ServerShutdown()
 		}
-		upd.ps.middlewares = upd.newMiddlewares
+		upd.ps.middlewares = upd.mwDiff.current
+		upd.ps.router = upd.newRouter
 	}
 
 	for _, ps := range comparisonRes.toStart {

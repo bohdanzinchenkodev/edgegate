@@ -69,6 +69,18 @@ func (pr *proxyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("No matching route for host=%s path=%s\n", host, path)
 	http.Error(w, "Bad Gateway", http.StatusBadGateway)
 }
+func (pr *proxyRouter) Equal(other *proxyRouter) bool {
+	if len(pr.routes) != len(other.routes) {
+		return false
+	}
+	for i, r := range pr.routes {
+		or := other.routes[i]
+		if r.host != or.host || r.pathPrefix != or.pathPrefix || r.upstream != or.upstream {
+			return false
+		}
+	}
+	return true
+}
 func compileRouter(l config.Listener) (*proxyRouter, error) {
 	pr := &proxyRouter{}
 	pr.routes = make([]compiledRoute, 0, len(l.Routes))
@@ -116,35 +128,46 @@ func buildHandlerWithMiddlewares(base http.Handler, mws []HandlerMiddleware) htt
 	}
 	return http.HandlerFunc(handler.ServeHTTP)
 }
-func buildNewMiddlewares(newMiddlewares, oldMiddlewares []HandlerMiddleware, listenAddr string) (res []HandlerMiddleware, changeDetected bool) {
-	if len(newMiddlewares) != len(oldMiddlewares) {
-		changeDetected = true
-	}
+func buildMiddlewareDiff(newMiddlewares, oldMiddlewares []HandlerMiddleware, listenAddr string) middlewareDiff {
+	diff := middlewareDiff{}
+	matched := make(map[int]bool) // tracks which old middlewares were matched
+
 	for _, nmw := range newMiddlewares {
 		found := false
-		for _, omw := range oldMiddlewares {
-			if reflect.TypeOf(nmw) != reflect.TypeOf(omw) {
+		for i, omw := range oldMiddlewares {
+			if matched[i] || reflect.TypeOf(nmw) != reflect.TypeOf(omw) {
 				continue
 			}
 
 			if omw.Equal(nmw) {
 				//if no changes detected then use old instance
-				res = append(res, omw)
+				diff.current = append(diff.current, omw)
 			} else {
-				//otherwise use new instance
+				//config changed — stop old, start new
 				log.Printf("[config] listener %s: middleware %T config changed\nold: %s\nnew: %s", listenAddr, nmw, omw, nmw)
-				res = append(res, nmw)
-				changeDetected = true
+				diff.toStop = append(diff.toStop, omw)
+				diff.toStart = append(diff.toStart, nmw)
+				diff.current = append(diff.current, nmw)
 			}
+			matched[i] = true
 			found = true
 			break
 		}
 		//we didn't find a match in old slice so we just add new mw
 		if !found {
 			log.Printf("[config] listener %s: middleware %T added", listenAddr, nmw)
-			res = append(res, nmw)
-			changeDetected = true
+			diff.toStart = append(diff.toStart, nmw)
+			diff.current = append(diff.current, nmw)
 		}
 	}
-	return res, changeDetected
+
+	// old middlewares that weren't matched need to be stopped
+	for i, omw := range oldMiddlewares {
+		if !matched[i] {
+			log.Printf("[config] listener %s: middleware %T removed", listenAddr, omw)
+			diff.toStop = append(diff.toStop, omw)
+		}
+	}
+
+	return diff
 }
