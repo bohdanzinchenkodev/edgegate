@@ -91,6 +91,9 @@ func compileRouter(l config.Listener) (*proxyRouter, error) {
 			return nil, err
 		}
 		p := NewProxy(u) // built once per reload, reused per request
+		if r.Match.PathPrefix != "" {
+			p.Prefix = r.Match.PathPrefix
+		}
 
 		pr.routes = append(pr.routes, compiledRoute{
 			host:       r.Match.Host,
