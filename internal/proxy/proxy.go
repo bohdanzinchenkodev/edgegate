@@ -51,6 +51,7 @@ func (proxy *EdgeGateProxy) getErrorHandler() func(http.ResponseWriter, *http.Re
 	}
 }
 func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	log.Printf("Proxying request: %s %s%s to upstream %s\n", req.Method, req.Host, req.URL.Path, proxy.upstream)
 	if proxy.Transport == nil {
 		proxy.Transport = defaultTransport
 	}
@@ -69,9 +70,7 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	ctx := req.Context()
 	outreq := req.Clone(ctx)
 	if proxy.Prefix != "" {
-		outreq.RequestURI = ""
-		outreq.Pattern = "/"
-		outreq.URL.Path = "/"
+		outreq.URL.Path = strings.TrimPrefix(outreq.URL.Path, proxy.Prefix)
 	}
 	if proxy.ReplaceHostToUpstream {
 		outreq.Host = proxy.upstream.Host
@@ -103,6 +102,7 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		outreq.Header.Set("Upgrade", upgradeHeader)
 	}
 	//send request
+	log.Printf("Outgoing request: %s %s%s to upstream %s\n", outreq.Method, outreq.Host, outreq.URL.Path, proxy.upstream)
 	res, err := proxy.Transport.RoundTrip(outreq)
 	errorHandler := proxy.getErrorHandler()
 	if err != nil {
