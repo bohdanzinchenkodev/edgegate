@@ -17,6 +17,8 @@ type orderTrackingMiddleware struct {
 
 func (m *orderTrackingMiddleware) ServerStart(_ context.Context) {}
 func (m *orderTrackingMiddleware) ServerShutdown()               {}
+func (m *orderTrackingMiddleware) Equal(other any) bool          { return false }
+func (m *orderTrackingMiddleware) String() string                { return m.name }
 func (m *orderTrackingMiddleware) WrapHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*m.called = append(*m.called, m.name)
@@ -110,7 +112,7 @@ func TestListenerRouter_ConcurrentAccess(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	router := newListenerRouter(base)
+	router := newHandlerWrapper(base)
 
 	var wg sync.WaitGroup
 
