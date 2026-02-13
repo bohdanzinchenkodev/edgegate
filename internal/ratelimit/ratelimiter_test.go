@@ -1,11 +1,18 @@
 package ratelimit
 
 import (
+	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func init() {
+	log.SetOutput(io.Discard)
+}
 
 type fakeClock struct {
 	currentTime time.Time
@@ -23,7 +30,6 @@ func TestRateLimiter_AllowReqResult(t *testing.T) {
 		Capacity:   10,
 		RefillRate: 0,
 		UsageRate:  1,
-		WheelSize:  10,
 	}
 	rl := NewRateLimiter(o)
 	for i := 0; i < 10; i++ {
@@ -41,7 +47,6 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	o := RateLimiterOption{
 		Capacity:    10,
 		DeleteAfter: 1 * time.Minute,
-		WheelSize:   1, // single slot for simplicity
 		Clock:       fc,
 	}
 	rl := NewRateLimiter(o)
@@ -53,10 +58,6 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	}
 
 	rl.cleanupTick()
-	slot := rl.wheel.slots[0]
-	if len(slot.keys) == 0 {
-		t.Fatalf("expected slot to have keys before time advancement")
-	}
 	_, exists = rl.entries.Load(ip)
 	if !exists {
 		t.Fatalf("expected entry for IP to still exist before time advancement")
@@ -66,10 +67,6 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	fc.Add(1 * time.Minute)
 
 	rl.cleanupTick()
-	slot = rl.wheel.slots[0]
-	if len(slot.keys) != 0 {
-		t.Fatalf("expected slot to be empty after cleanup")
-	}
 	_, exists = rl.entries.Load(ip)
 	if exists {
 		t.Fatalf("expected entry for IP to be deleted after cleanup")
@@ -203,6 +200,63 @@ func TestResolveIP_NotTrustedProxy_IgnoresForwardedHeaders_ReturnsRemoteAddr(t *
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
+}
+
+// populateEntries fills the rate limiter with n token buckets.
+func populateEntries(rl *RateLimiter, n int) []string {
+	keys := make([]string, n)
+	now := rl.clock.Now()
+	for i := 0; i < n; i++ {
+		key := fmt.Sprintf("10.%d.%d.%d", i/65536, (i/256)%256, i%256)
+		keys[i] = key
+
+		tb := newTokenBucket(rl.capacity, rl.refillRate, rl.clock)
+		tb.expireAt = now.Add(5 * time.Minute)
+		rl.entries.Store(key, tb)
+	}
+	return keys
+}
+
+func BenchmarkAllowReq_Parallel_100K(b *testing.B) {
+	rl := NewRateLimiter(RateLimiterOption{
+		Capacity:        1000,
+		RefillRate:      1000,
+		UsageRate:       1,
+		DeleteAfter:     5 * time.Minute,
+		CleanupInterval: 10 * time.Second,
+	})
+	keys := populateEntries(rl, 100000)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			rl.AllowReq(keys[i%100000])
+			i++
+		}
+	})
+}
+
+func BenchmarkAllowReq_Parallel_1M(b *testing.B) {
+	rl := NewRateLimiter(RateLimiterOption{
+		Capacity:        1000,
+		RefillRate:      1000,
+		UsageRate:       1,
+		DeleteAfter:     5 * time.Minute,
+		CleanupInterval: 10 * time.Second,
+	})
+	keys := populateEntries(rl, 1_000_000)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			rl.AllowReq(keys[i%1_000_000])
+			i++
+		}
+	})
 }
 
 func TestResolveIP_RemoteAddrWithoutPort_ReturnsError(t *testing.T) {
