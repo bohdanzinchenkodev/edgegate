@@ -28,11 +28,8 @@ type RateLimiter struct {
 	capacity        int
 	refillRate      float64
 	usageRate       int
-	mux             sync.Mutex
-	wheel           wheel
 	cleanupInterval time.Duration
 	deleteAfter     time.Duration
-	wheelSize       int
 	clock           clock
 	trustedProxies  []string
 	cancelCleanup   context.CancelFunc
@@ -43,33 +40,18 @@ type RateLimiterOption struct {
 	UsageRate       int
 	CleanupInterval time.Duration
 	DeleteAfter     time.Duration
-	WheelSize       int
 	Clock           clock
 	TrustedProxies  []string
 }
 
-type wheel struct {
-	slots []*slot
-	cur   int
-}
-type slot struct {
-	keys []string
-	mux  sync.Mutex
-}
-
 func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
-	slots := make([]*slot, rlOptions.WheelSize)
-	for i := range slots {
-		slots[i] = &slot{}
-	}
 	if rlOptions.Clock == nil {
 		rlOptions.Clock = &realClock{}
 	}
-	log.Printf("RateLimiter created with capacity: %d, refillRate: %.2f, usageRate: %d, wheelSize: %d, deleteAfter: %s, cleanupInterval: %s\n",
+	log.Printf("RateLimiter created with capacity: %d, refillRate: %.2f, usageRate: %d, deleteAfter: %s, cleanupInterval: %s",
 		rlOptions.Capacity,
 		rlOptions.RefillRate,
 		rlOptions.UsageRate,
-		rlOptions.WheelSize,
 		rlOptions.DeleteAfter.String(),
 		rlOptions.CleanupInterval.String(),
 	)
@@ -78,17 +60,15 @@ func NewRateLimiter(rlOptions RateLimiterOption) *RateLimiter {
 		capacity:        rlOptions.Capacity,
 		refillRate:      rlOptions.RefillRate,
 		usageRate:       rlOptions.UsageRate,
-		wheel:           wheel{slots: slots},
 		cleanupInterval: rlOptions.CleanupInterval,
-		wheelSize:       rlOptions.WheelSize,
 		deleteAfter:     rlOptions.DeleteAfter,
 		clock:           rlOptions.Clock,
 		trustedProxies:  rlOptions.TrustedProxies,
 	}
 }
 func (rl *RateLimiter) String() string {
-	return fmt.Sprintf("{capacity:%d refillRate:%.2f usageRate:%d wheelSize:%d deleteAfter:%s cleanupInterval:%s trustedProxies:%v}",
-		rl.capacity, rl.refillRate, rl.usageRate, rl.wheelSize, rl.deleteAfter, rl.cleanupInterval, rl.trustedProxies)
+	return fmt.Sprintf("{capacity:%d refillRate:%.2f usageRate:%d deleteAfter:%s cleanupInterval:%s trustedProxies:%v}",
+		rl.capacity, rl.refillRate, rl.usageRate, rl.deleteAfter, rl.cleanupInterval, rl.trustedProxies)
 }
 
 func (rl *RateLimiter) Equal(other any) bool {
@@ -102,7 +82,6 @@ func (rl *RateLimiter) Equal(other any) bool {
 	return rl.capacity == o.capacity &&
 		rl.refillRate == o.refillRate &&
 		rl.usageRate == o.usageRate &&
-		rl.wheelSize == o.wheelSize &&
 		rl.deleteAfter == o.deleteAfter &&
 		rl.cleanupInterval == o.cleanupInterval &&
 		slicesEqual(rl.trustedProxies, o.trustedProxies)
@@ -130,31 +109,12 @@ func (rl *RateLimiter) AllowReq(key string) bool {
 	if !ok {
 		return false
 	}
-	/*log.Printf("Bucket info - capacity: %v, tokens: %v", v.capacity, v.tokens)*/
-
-	//set expiry date for bucket
+	// set expiry date for bucket
 	v.mux.Lock()
 	v.expireAt = rl.clock.Now().Add(rl.deleteAfter)
 	v.mux.Unlock()
 
-	// Add to wheel slot
-	rl.addToWheel(key)
-	res := v.take(rl.usageRate)
-	return res
-}
-
-func (rl *RateLimiter) addToWheel(key string) {
-	currentTick := rl.clock.Now().Unix()
-	da := int64(rl.deleteAfter.Seconds())
-	//ex: (531 + 300) % 300 = 231
-	slotIndex := (currentTick + da) % int64(rl.wheelSize)
-	s := rl.wheel.slots[slotIndex]
-
-	s.mux.Lock()
-	s.keys = append(s.keys, key)
-	s.mux.Unlock()
-
-	log.Printf("%s was added to slot: %d", key, slotIndex)
+	return v.take(rl.usageRate)
 }
 func (rl *RateLimiter) ServerStart(ctx context.Context) {
 	cleanupCtx, cancel := context.WithCancel(ctx)
@@ -199,32 +159,16 @@ func (rl *RateLimiter) cleanup(ctx context.Context) {
 }
 func (rl *RateLimiter) cleanupTick() {
 	now := rl.clock.Now()
-	slotIndex := (now.Unix() + 1) % int64(rl.wheelSize)
-
-	s := rl.wheel.slots[slotIndex]
-	s.mux.Lock()
-	survivedKeys := make([]string, 0)
-	for _, key := range s.keys {
-		tb, ok := rl.entries.Load(key)
-		if !ok {
-			continue
-		}
-		v, ok := tb.(*tokenBucket)
-		if !ok {
-			rl.entries.Delete(key)
-			continue
-		}
-		v.mux.Lock()
-		diff := now.Sub(v.expireAt)
-		v.mux.Unlock()
+	rl.entries.Range(func(key, value any) bool {
+		tb := value.(*tokenBucket)
+		tb.mux.Lock()
+		diff := now.Sub(tb.expireAt)
+		tb.mux.Unlock()
 		if diff.Seconds() >= 0 {
 			rl.entries.Delete(key)
-			continue
 		}
-		survivedKeys = append(survivedKeys, key)
-	}
-	s.keys = survivedKeys
-	s.mux.Unlock()
+		return true
+	})
 }
 func (rl *RateLimiter) resolveIp(r *http.Request) (string, error) {
 

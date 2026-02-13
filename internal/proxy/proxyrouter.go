@@ -114,8 +114,7 @@ func compileMiddlewares(l config.Listener) []HandlerMiddleware {
 			Capacity:        l.RateLimit.Requests,
 			RefillRate:      refillRate,
 			TrustedProxies:  l.RateLimit.TrustedProxies,
-			UsageRate:       1, //1 request per token
-			WheelSize:       int(l.RateLimit.ClientTTL.Seconds()),
+			UsageRate:       1,               //1 request per token
 			CleanupInterval: 1 * time.Second, //cleanup every second
 			DeleteAfter:     l.RateLimit.ClientTTL,
 		}
