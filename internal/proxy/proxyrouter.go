@@ -54,13 +54,13 @@ func (pr *proxyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, route := range pr.routes {
 		// host match
 		if route.host != "" && strings.EqualFold(route.host, host) {
-			log.Printf("Matched host route: host=%s upstream=%s\n", route.host, route.upstream)
+			//log.Printf("Matched host route: host=%s upstream=%s\n", route.host, route.upstream)
 			route.proxy.ServeHTTP(w, r)
 			return
 		}
 		// path prefix match
 		if route.pathPrefix != "" && strings.HasPrefix(path, route.pathPrefix) {
-			log.Printf("Matched path prefix route: path_prefix=%s upstream=%s\n", route.pathPrefix, route.upstream)
+			//log.Printf("Matched path prefix route: path_prefix=%s upstream=%s\n", route.pathPrefix, route.upstream)
 			route.proxy.ServeHTTP(w, r)
 			return
 		}
