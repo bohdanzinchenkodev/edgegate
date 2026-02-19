@@ -9,6 +9,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"strings"
+	"time"
 
 	"golang.org/x/net/http/httpguts"
 )
@@ -39,7 +40,11 @@ func NewProxy(upstream *url.URL) *EdgeGateProxy {
 	}
 }
 
-var defaultTransport = http.DefaultTransport
+var defaultTransport http.RoundTripper = &http.Transport{
+	MaxIdleConns:        1024,
+	MaxIdleConnsPerHost: 1024,
+	IdleConnTimeout:     90 * time.Second,
+}
 
 func (proxy *EdgeGateProxy) getErrorHandler() func(http.ResponseWriter, *http.Request, error) {
 	if proxy.ErrorHandler != nil {
