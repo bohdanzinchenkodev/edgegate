@@ -177,20 +177,24 @@ func upgrade(w http.ResponseWriter, res *http.Response, req *http.Request) error
 	if !strings.EqualFold(reqUpgrade, resUpgrade) {
 		return errors.New("upgrade headers do not match")
 	}
+
 	backConn, ok := res.Body.(io.ReadWriteCloser)
 	if !ok {
 		return errors.New("switching protocols response with non-writable body")
 	}
 	defer backConn.Close()
+
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		return errors.New("response writer does not support hijacking")
 	}
+
 	clientConn, buff, err := hijacker.Hijack()
 	if err != nil {
 		return err
 	}
 	defer clientConn.Close()
+
 	copyHeader(w.Header(), res.Header, "")
 	res.Header = w.Header()
 	res.Body = nil
@@ -199,10 +203,12 @@ func upgrade(w http.ResponseWriter, res *http.Response, req *http.Request) error
 	if err != nil {
 		return err
 	}
+
 	err = buff.Flush()
 	if err != nil {
 		return err
 	}
+
 	errch := make(chan error, 1)
 	go copyStream(clientConn, backConn, errch)
 	go copyStream(backConn, clientConn, errch)
@@ -211,6 +217,7 @@ func upgrade(w http.ResponseWriter, res *http.Response, req *http.Request) error
 	if err == nil {
 		err = <-errch
 	}
+
 	return nil
 }
 func copyStream(dst, src io.ReadWriter, errch chan error) {
