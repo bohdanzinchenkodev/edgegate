@@ -8,20 +8,28 @@ RATE="${RATE:-10000}"
 DURATION="${DURATION:-30s}"
 WORKERS="${WORKERS:-500}"
 CONNECTIONS="${CONNECTIONS:-5000}"
-OUT_PREFIX="${OUT_PREFIX:-proxy-via-edgegate}"
+
+BENCH_DIR="/tmp/edgegate-bench"
+mkdir -p "$BENCH_DIR"
+RESULT_FILE="$BENCH_DIR/proxy-via-edgegate.bin"
+TARGETS_FILE=$(mktemp "$BENCH_DIR/targets-proxy.XXXXXX")
 
 if ! command -v vegeta >/dev/null 2>&1; then
   echo "vegeta is required. Install it first."
   exit 1
 fi
 
-TARGETS_FILE=$(mktemp)
-trap "rm -f $TARGETS_FILE" EXIT
+cleanup() {
+  rm -f "$TARGETS_FILE"
+}
+trap cleanup EXIT
 
 printf 'GET http://%s:%s/get\nHost: %s\n\n' "$PROXY_HOST" "$PROXY_PORT" "$TARGET_HOST" > "$TARGETS_FILE"
 
 echo "Running proxy load test"
-echo "target=http://$PROXY_HOST:$PROXY_PORT/get Host=$TARGET_HOST rate=$RATE duration=$DURATION workers=$WORKERS connections=$CONNECTIONS"
+echo "  target : http://$PROXY_HOST:$PROXY_PORT/get"
+echo "  host   : $TARGET_HOST"
+echo "  rate   : $RATE  duration: $DURATION  workers: $WORKERS  connections: $CONNECTIONS"
 
 vegeta attack \
   -targets="$TARGETS_FILE" \
@@ -30,15 +38,15 @@ vegeta attack \
   -workers="$WORKERS" \
   -connections="$CONNECTIONS" \
   -keepalive=true \
-  > "$OUT_PREFIX.bin"
+  > "$RESULT_FILE"
 
 echo ""
 echo "Summary report"
-vegeta report "$OUT_PREFIX.bin"
+vegeta report "$RESULT_FILE"
 
 echo ""
 echo "Latency histogram"
-vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$OUT_PREFIX.bin"
+vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$RESULT_FILE"
 
 echo ""
-echo "Saved binary result: $OUT_PREFIX.bin"
+echo "Result saved: $RESULT_FILE"
