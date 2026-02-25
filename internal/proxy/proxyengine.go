@@ -2,13 +2,15 @@ package egproxy
 
 import (
 	"context"
-	"edgegate/internal/config"
+	"crypto/tls"
 	"errors"
 	"log"
 	"net"
 	"net/http"
 	"sync"
 	"time"
+
+	"edgegate/internal/config"
 )
 
 // Global state for running proxy servers
@@ -25,22 +27,41 @@ type proxyServer struct {
 	handlerWrapper *handlerWrapper
 	middlewares    []HandlerMiddleware
 	router         *proxyRouter
+	tlsManager     *tlsManager
 }
 type compareConfigsResult struct {
-	toStop   []*proxyServer
-	toStart  []*proxyServer
-	toUpdate []*toUpdateServer
+	toStop    []*proxyServer
+	toStart   []*proxyServer
+	toUpdate  []*toUpdateServer
+	toReplace []*toReplaceServer // server must be fully replaced (e.g. TLS toggled) — stop old, then start new sequentially
 }
 type toUpdateServer struct {
-	ps        *proxyServer
-	handler   http.Handler
-	mwDiff    middlewareDiff
-	newRouter *proxyRouter
+	ps            *proxyServer
+	handler       http.Handler
+	mwDiff        middlewareDiff
+	newRouter     *proxyRouter
+	newTlsManager *tlsManager // non-nil when TLS certs changed and need reload
+}
+type toReplaceServer struct {
+	old *proxyServer
+	new *proxyServer
 }
 type middlewareDiff struct {
 	toStop  []HandlerMiddleware
 	toStart []HandlerMiddleware
 	current []HandlerMiddleware // resulting full slice to store
+}
+
+func newProxyServer(l config.Listener, pr *proxyRouter, middlewares []HandlerMiddleware, tm *tlsManager) *proxyServer {
+	wrapper := newHandlerWrapper(buildHandlerWithMiddlewares(pr, middlewares))
+	return &proxyServer{
+		server:         &http.Server{Addr: l.Listen, Handler: wrapper},
+		done:           make(chan struct{}),
+		handlerWrapper: wrapper,
+		middlewares:    middlewares,
+		router:         pr,
+		tlsManager:     tm,
+	}
 }
 
 func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsResult {
@@ -60,24 +81,33 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 			continue
 		}
 		middlewares := compileMiddlewares(l)
+		tlsCfg := compileTlsManager(l)
 		ps, exists := servers[l.Listen]
 		if !exists {
 			// New listener — create and mark for start
 			log.Printf("[config] listener %s: added", l.Listen)
-			wrapper := newHandlerWrapper(buildHandlerWithMiddlewares(pr, middlewares))
-			ps = &proxyServer{
-				server:         &http.Server{Addr: l.Listen, Handler: wrapper},
-				done:           make(chan struct{}),
-				handlerWrapper: wrapper,
-				middlewares:    middlewares,
-				router:         pr,
-			}
+
+			ps = newProxyServer(l, pr, middlewares, tlsCfg)
 			servers[l.Listen] = ps
+
 			result.toStart = append(result.toStart, ps)
 		} else {
 
 			// Remove from oldMap to mark as processed
 			delete(oldMap, l.Listen)
+
+			// Conditions that require full server replacement (can't update in-place)
+			needsReplace := (tlsCfg == nil) != (ps.tlsManager == nil) // TLS toggled on/off
+			if needsReplace {
+				log.Printf("[config] listener %s: replacing server", l.Listen)
+				delete(servers, l.Listen)
+
+				newPs := newProxyServer(l, pr, middlewares, tlsCfg)
+				servers[l.Listen] = newPs
+
+				result.toReplace = append(result.toReplace, &toReplaceServer{old: ps, new: newPs})
+				continue
+			}
 
 			var handler http.Handler
 			var newRouter *proxyRouter
@@ -92,19 +122,34 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 				handler = ps.router
 				newRouter = ps.router
 			}
+
 			// we want to reuse old middlewares if they are the same (e.g. rate limiter with the same config) to avoid unnecessary resets and state loss
 			diff := buildMiddlewareDiff(middlewares, ps.middlewares, l.Listen)
 			middlewaresChanged := len(diff.toStop) > 0 || len(diff.toStart) > 0
-			if !routesChanged && !middlewaresChanged {
+			tlsChanged := !tlsCfg.Equal(ps.tlsManager)
+
+			if tlsChanged {
+				log.Printf("[config] listener %s: TLS certificates changed", l.Listen)
+			}
+
+			if !routesChanged && !middlewaresChanged && !tlsChanged {
 				log.Printf("[config] listener %s: no changes detected", l.Listen)
 				continue // no changes, skip
 			}
-			log.Printf("[config] listener %s: updating (routes=%v middlewares=%v)", l.Listen, routesChanged, middlewaresChanged)
+
+			log.Printf("[config] listener %s: updating (routes=%v middlewares=%v tls=%v)", l.Listen, routesChanged, middlewaresChanged, tlsChanged)
+
+			var newTls *tlsManager
+			if tlsChanged {
+				newTls = tlsCfg
+			}
+
 			result.toUpdate = append(result.toUpdate, &toUpdateServer{
-				ps:        ps,
-				handler:   handler,
-				mwDiff:    diff,
-				newRouter: newRouter,
+				ps:            ps,
+				handler:       handler,
+				mwDiff:        diff,
+				newRouter:     newRouter,
+				newTlsManager: newTls,
 			})
 		}
 	}
@@ -162,6 +207,13 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 		}
 		upd.ps.middlewares = upd.mwDiff.current
 		upd.ps.router = upd.newRouter
+		// reload TLS certs if changed — new connections will use new certs
+		if upd.newTlsManager != nil {
+			err := upd.ps.tlsManager.Reload(upd.newTlsManager.certs)
+			if err != nil {
+				log.Printf("[config] listener %s: TLS cert reload failed: %v", upd.ps.server.Addr, err)
+			}
+		}
 	}
 
 	for _, ps := range comparisonRes.toStart {
@@ -179,19 +231,51 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 		go shutdownServer(ps)
 	}
 
+	// Server replacement — must stop old server and release port before starting new one
+	for _, rp := range comparisonRes.toReplace {
+		for _, mw := range rp.old.middlewares {
+			mw.ServerShutdown()
+		}
+		shutdownServer(rp.old)
+		for _, mw := range rp.new.middlewares {
+			mw.ServerStart(context.Background())
+		}
+		go startServer(rp.new)
+	}
+
 	currCfg = *cfg
 }
 
 func startServer(ps *proxyServer) {
-	log.Printf("Starting server on %v\n", ps.server.Addr)
-
-	err := ps.server.ListenAndServe()
 	defer close(ps.done)
 
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Print(err)
+	if ps.tlsManager != nil {
+		log.Printf("Starting TLS server on %v", ps.server.Addr)
+		err := ps.tlsManager.Reload(nil)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+		ln, err := net.Listen("tcp", ps.server.Addr)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+		tlsLn := tls.NewListener(ln, &tls.Config{
+			GetCertificate: ps.tlsManager.GetCertificate,
+		})
+		err = ps.server.Serve(tlsLn)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Print(err)
+		}
+	} else {
+		log.Printf("Starting server on %v", ps.server.Addr)
+		err := ps.server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Print(err)
+		}
 	}
-	log.Printf("Server on %v stopped\n", ps.server.Addr)
+	log.Printf("Server on %v stopped", ps.server.Addr)
 }
 
 func shutdownServer(ps *proxyServer) {

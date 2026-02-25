@@ -13,6 +13,7 @@ type Listener struct {
 	Listen    string          `yaml:"listen"`
 	Routes    []Route         `yaml:"routes"`
 	RateLimit rateLimitPolicy `yaml:"rate_limit"`
+	Tls       TLSConfig       `yaml:"tls"`
 }
 type Route struct {
 	Match    Match  `yaml:"match"`
@@ -21,6 +22,16 @@ type Route struct {
 type Match struct {
 	PathPrefix string `yaml:"path_prefix"`
 	Host       string `yaml:"host"`
+}
+type TLSConfig struct {
+	Certificates    []CertEntry `yaml:"certificates"`
+	DefaultCertFile string      `yaml:"default_cert_file"`
+	DefaultKeyFile  string      `yaml:"default_key_file"`
+}
+type CertEntry struct {
+	Hostname string `yaml:"hostname"`
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
 }
 type rateLimitPolicy struct {
 	Enabled bool `yaml:"enabled"`
