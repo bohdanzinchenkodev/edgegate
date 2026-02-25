@@ -196,15 +196,11 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 
 	for _, upd := range comparisonRes.toUpdate {
 		// start new middlewares BEFORE making handler live
-		for _, mw := range upd.mwDiff.toStart {
-			mw.ServerStart(context.Background())
-		}
+		startMiddlewares(upd.mwDiff.toStart, context.Background())
 		handler := buildHandlerWithMiddlewares(upd.handler, upd.mwDiff.current)
 		upd.ps.handlerWrapper.Update(handler)
 		// shutdown old middlewares AFTER handler is swapped
-		for _, mw := range upd.mwDiff.toStop {
-			mw.ServerShutdown()
-		}
+		shutdownMiddlewares(upd.mwDiff.toStop)
 		upd.ps.middlewares = upd.mwDiff.current
 		upd.ps.router = upd.newRouter
 		// reload TLS certs if changed — new connections will use new certs
@@ -218,28 +214,21 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 
 	for _, ps := range comparisonRes.toStart {
 		// start middlewares BEFORE server accepts requests
-		for _, mw := range ps.middlewares {
-			mw.ServerStart(context.Background())
-		}
+		startMiddlewares(ps.middlewares, context.Background())
 		go startServer(ps)
 	}
 
 	for _, ps := range comparisonRes.toStop {
-		for _, mw := range ps.middlewares {
-			mw.ServerShutdown()
-		}
+		shutdownMiddlewares(ps.middlewares)
 		go shutdownServer(ps)
 	}
 
 	// Server replacement — must stop old server and release port before starting new one
 	for _, rp := range comparisonRes.toReplace {
-		for _, mw := range rp.old.middlewares {
-			mw.ServerShutdown()
-		}
+		shutdownMiddlewares(rp.old.middlewares)
+		//sync shutdown to ensure port is released before new server starts
 		shutdownServer(rp.old)
-		for _, mw := range rp.new.middlewares {
-			mw.ServerStart(context.Background())
-		}
+		startMiddlewares(rp.new.middlewares, context.Background())
 		go startServer(rp.new)
 	}
 
@@ -292,9 +281,7 @@ func shutdownAll() {
 	servers = map[string]*proxyServer{}
 	// shutdown middlewares while holding lock (protects ps.middlewares access)
 	for _, ps := range old {
-		for _, mw := range ps.middlewares {
-			mw.ServerShutdown()
-		}
+		shutdownMiddlewares(ps.middlewares)
 	}
 	mu.Unlock()
 
@@ -309,6 +296,22 @@ func shutdownAll() {
 		}()
 	}
 	wg.Wait()
+}
+
+func startMiddlewares(mws []HandlerMiddleware, ctx context.Context) {
+	for _, mw := range mws {
+		if lm, ok := mw.(LifecycleMiddleware); ok {
+			lm.ServerStart(ctx)
+		}
+	}
+}
+
+func shutdownMiddlewares(mws []HandlerMiddleware) {
+	for _, mw := range mws {
+		if lm, ok := mw.(LifecycleMiddleware); ok {
+			lm.ServerShutdown()
+		}
+	}
 }
 
 func stripPort(h string) string {
