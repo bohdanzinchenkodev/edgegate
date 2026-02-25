@@ -15,10 +15,8 @@ type orderTrackingMiddleware struct {
 	called *[]string
 }
 
-func (m *orderTrackingMiddleware) ServerStart(_ context.Context) {}
-func (m *orderTrackingMiddleware) ServerShutdown()               {}
-func (m *orderTrackingMiddleware) Equal(other any) bool          { return false }
-func (m *orderTrackingMiddleware) String() string                { return m.name }
+func (m *orderTrackingMiddleware) Equal(other any) bool { return false }
+func (m *orderTrackingMiddleware) String() string       { return m.name }
 func (m *orderTrackingMiddleware) WrapHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*m.called = append(*m.called, m.name)
@@ -102,9 +100,7 @@ func TestApplyConfig_NewListener_StartsMiddlewares(t *testing.T) {
 	defer cancel()
 	_ = ps.server.Shutdown(ctx)
 
-	for _, mw := range ps.middlewares {
-		mw.ServerShutdown()
-	}
+	shutdownMiddlewares(ps.middlewares)
 }
 
 func TestListenerRouter_ConcurrentAccess(t *testing.T) {
