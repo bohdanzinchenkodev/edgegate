@@ -24,6 +24,7 @@ type Match struct {
 	Host       string `yaml:"host"`
 }
 type TLSConfig struct {
+	Enabled         bool        `yaml:"enabled"`
 	Certificates    []CertEntry `yaml:"certificates"`
 	DefaultCertFile string      `yaml:"default_cert_file"`
 	DefaultKeyFile  string      `yaml:"default_key_file"`
@@ -50,6 +51,10 @@ type rateLimitPolicy struct {
 func ParseConfig(file []byte) (*ReverseProxyConfig, error) {
 	cfg := &ReverseProxyConfig{}
 	err := yaml.Unmarshal(file, cfg)
+	if err != nil {
+		return nil, err
+	}
+	err = validate(*cfg)
 	if err != nil {
 		return nil, err
 	}

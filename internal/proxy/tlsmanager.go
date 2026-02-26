@@ -21,6 +21,10 @@ type certEntry struct {
 }
 
 func compileTlsManager(l config.Listener) *tlsManager {
+	if !l.Tls.Enabled {
+		return nil
+	}
+
 	if len(l.Tls.Certificates) == 0 && l.Tls.DefaultCertFile == "" {
 		return nil
 	}
