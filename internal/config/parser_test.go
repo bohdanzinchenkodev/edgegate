@@ -2,7 +2,7 @@ package config
 
 import "testing"
 
-func TestParseConfig_MalformedYAML_ReturnsError(t *testing.T) {
+func TestParseConfig_MalformedYAMLReturnsError(t *testing.T) {
 	file := []byte("listeners: [")
 
 	_, err := ParseConfig(file)
@@ -11,7 +11,7 @@ func TestParseConfig_MalformedYAML_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestParseConfig_InvalidType_ReturnsError(t *testing.T) {
+func TestParseConfig_InvalidTypeReturnsError(t *testing.T) {
 	file := []byte(`listeners:
   - listen: ":8080"
     rate_limit:
@@ -30,7 +30,7 @@ func TestParseConfig_InvalidType_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestParseConfig_InvalidDuration_ReturnsError(t *testing.T) {
+func TestParseConfig_InvalidDurationReturnsError(t *testing.T) {
 	file := []byte(`listeners:
   - listen: ":8080"
     rate_limit:
@@ -49,7 +49,7 @@ func TestParseConfig_InvalidDuration_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestParseConfig_MissingOptionalSections_ReturnsObjectWithZeroValues(t *testing.T) {
+func TestParseConfig_MissingOptionalSectionsReturnsObjectWithZeroValues(t *testing.T) {
 	file := []byte(`listeners:
   - listen: ":8080"
     routes:

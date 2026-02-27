@@ -2,7 +2,7 @@ package config
 
 import "testing"
 
-func TestValidate_DuplicateListenerAddresses_ReturnsError(t *testing.T) {
+func TestValidate_DuplicateListenerAddressesReturnsError(t *testing.T) {
 	cfg := ReverseProxyConfig{
 		Listeners: []Listener{
 			{
@@ -32,7 +32,7 @@ func TestValidate_DuplicateListenerAddresses_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestValidate_TLSEnabledWithoutDefaultOrCertificates_ReturnsError(t *testing.T) {
+func TestValidate_TLSEnabledWithoutDefaultOrCertificatesReturnsError(t *testing.T) {
 	cfg := ReverseProxyConfig{
 		Listeners: []Listener{
 			{
@@ -56,7 +56,7 @@ func TestValidate_TLSEnabledWithoutDefaultOrCertificates_ReturnsError(t *testing
 	}
 }
 
-func TestValidate_TLSEnabledWithoutDefaultAndMissingHostCert_ReturnsError(t *testing.T) {
+func TestValidate_TLSEnabledWithoutDefaultAndMissingHostCertReturnsError(t *testing.T) {
 	cfg := ReverseProxyConfig{
 		Listeners: []Listener{
 			{
@@ -87,7 +87,7 @@ func TestValidate_TLSEnabledWithoutDefaultAndMissingHostCert_ReturnsError(t *tes
 	}
 }
 
-func TestValidate_TLSEnabledWithDefaultCert_AllowsRouteWithoutHost(t *testing.T) {
+func TestValidate_TLSEnabledWithDefaultCertAllowsRouteWithoutHost(t *testing.T) {
 	cfg := ReverseProxyConfig{
 		Listeners: []Listener{
 			{
@@ -113,7 +113,7 @@ func TestValidate_TLSEnabledWithDefaultCert_AllowsRouteWithoutHost(t *testing.T)
 	}
 }
 
-func TestValidate_RateLimitEnabledWithInvalidNumbers_ReturnsError(t *testing.T) {
+func TestValidate_RateLimitEnabledWithInvalidNumbersReturnsError(t *testing.T) {
 	cfg := ReverseProxyConfig{
 		Listeners: []Listener{
 			{
@@ -139,7 +139,7 @@ func TestValidate_RateLimitEnabledWithInvalidNumbers_ReturnsError(t *testing.T) 
 	}
 }
 
-func TestValidate_RouteWithoutHostAndPathPrefix_ReturnsError(t *testing.T) {
+func TestValidate_RouteWithoutHostAndPathPrefixReturnsError(t *testing.T) {
 	cfg := ReverseProxyConfig{
 		Listeners: []Listener{
 			{
