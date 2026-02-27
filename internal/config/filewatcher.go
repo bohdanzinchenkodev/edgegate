@@ -28,6 +28,23 @@ func (rc *realClock) Now() time.Time {
 	return time.Now()
 }
 
+type watcherTicker interface {
+	Chan() <-chan time.Time
+	Stop()
+}
+
+type realTicker struct {
+	ticker *time.Ticker
+}
+
+func (rt *realTicker) Chan() <-chan time.Time {
+	return rt.ticker.C
+}
+
+func (rt *realTicker) Stop() {
+	rt.ticker.Stop()
+}
+
 type FileWatcher struct {
 	filePath             string
 	Interval             time.Duration
@@ -42,6 +59,7 @@ type FileWatcher struct {
 	lastHashingTime      time.Time
 	MaxDurWithoutHashing time.Duration
 	clock                clock
+	newTicker            func(time.Duration) watcherTicker
 }
 
 func NewFileWatcher(filePath string) *FileWatcher {
@@ -50,6 +68,9 @@ func NewFileWatcher(filePath string) *FileWatcher {
 		errorCh:  make(chan error, 1),
 		bytesCh:  make(chan []byte, 1),
 		clock:    &realClock{},
+		newTicker: func(d time.Duration) watcherTicker {
+			return &realTicker{ticker: time.NewTicker(d)}
+		},
 	}
 }
 
@@ -60,7 +81,7 @@ func (fw *FileWatcher) Watch(ctx context.Context) {
 	if interval == 0 {
 		interval = defaultInterval
 	}
-	ticker := time.NewTicker(interval)
+	ticker := fw.makeTicker(interval)
 	defer ticker.Stop()
 
 	fileData, err := fw.checkOnce()
@@ -75,7 +96,7 @@ func (fw *FileWatcher) Watch(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticker.Chan():
 			fileData, err = fw.checkOnce()
 			if err != nil {
 				select {
@@ -183,4 +204,11 @@ func (fw *FileWatcher) maxDurWithoutHashing() time.Duration {
 		return defaultMaxDurWithoutHashing
 	}
 	return fw.MaxDurWithoutHashing
+}
+
+func (fw *FileWatcher) makeTicker(interval time.Duration) watcherTicker {
+	if fw.newTicker == nil {
+		return &realTicker{ticker: time.NewTicker(interval)}
+	}
+	return fw.newTicker(interval)
 }
