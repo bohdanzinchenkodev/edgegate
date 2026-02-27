@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const maxDurWithoutHashing time.Duration = 10 * time.Minute
+const defaultMaxDurWithoutHashing time.Duration = 10 * time.Minute
 
 var defaultInterval = 5 * time.Second
 
@@ -29,18 +29,19 @@ func (rc *realClock) Now() time.Time {
 }
 
 type FileWatcher struct {
-	filePath           string
-	Interval           time.Duration
-	FileChangedHandler FileChangedHandler
-	ErrorHandler       ErrorHandler
-	ReturnBytesOnInit  bool
-	bytesCh            chan []byte
-	errorCh            chan error
-	lastSize           int64
-	lastFileModTime    time.Time
-	lastHash           []byte
-	lastHashingTime    time.Time
-	clock              clock
+	filePath             string
+	Interval             time.Duration
+	FileChangedHandler   FileChangedHandler
+	ErrorHandler         ErrorHandler
+	ReturnBytesOnInit    bool
+	bytesCh              chan []byte
+	errorCh              chan error
+	lastSize             int64
+	lastFileModTime      time.Time
+	lastHash             []byte
+	lastHashingTime      time.Time
+	MaxDurWithoutHashing time.Duration
+	clock                clock
 }
 
 func NewFileWatcher(filePath string) *FileWatcher {
@@ -174,5 +175,12 @@ func (fw *FileWatcher) getNewHash(file []byte) []byte {
 func (fw *FileWatcher) hashingRequired() bool {
 	now := fw.clock.Now()
 	elapsed := now.Sub(fw.lastHashingTime)
-	return elapsed > maxDurWithoutHashing
+	return elapsed > fw.maxDurWithoutHashing()
+}
+
+func (fw *FileWatcher) maxDurWithoutHashing() time.Duration {
+	if fw.MaxDurWithoutHashing == 0 {
+		return defaultMaxDurWithoutHashing
+	}
+	return fw.MaxDurWithoutHashing
 }
