@@ -15,6 +15,19 @@ var defaultInterval = 5 * time.Second
 
 type FileChangedHandler func(file []byte)
 type ErrorHandler func(err error)
+
+type clock interface {
+	Now() time.Time
+}
+
+type realClock struct {
+	now time.Time
+}
+
+func (rc *realClock) Now() time.Time {
+	return time.Now()
+}
+
 type FileWatcher struct {
 	filePath           string
 	Interval           time.Duration
@@ -27,6 +40,7 @@ type FileWatcher struct {
 	lastFileModTime    time.Time
 	lastHash           []byte
 	lastHashingTime    time.Time
+	clock              clock
 }
 
 func NewFileWatcher(filePath string) *FileWatcher {
@@ -34,6 +48,7 @@ func NewFileWatcher(filePath string) *FileWatcher {
 		filePath: filePath,
 		errorCh:  make(chan error, 1),
 		bytesCh:  make(chan []byte, 1),
+		clock:    &realClock{},
 	}
 }
 
@@ -109,7 +124,7 @@ func (fw *FileWatcher) checkOnce() ([]byte, error) {
 		}
 		hash := fw.getNewHash(fileData)
 
-		fw.lastHashingTime = time.Now()
+		fw.lastHashingTime = fw.clock.Now()
 		fw.update(newModTime, newSize, hash)
 		return fileData, nil
 	}
@@ -127,7 +142,7 @@ func (fw *FileWatcher) checkOnce() ([]byte, error) {
 	}
 
 	log.Println("hashing...")
-	fw.lastHashingTime = time.Now()
+	fw.lastHashingTime = fw.clock.Now()
 	hash := fw.getNewHash(fileData)
 	//check if the file was changed
 	if bytes.Equal(hash, fw.lastHash) {
@@ -157,7 +172,7 @@ func (fw *FileWatcher) getNewHash(file []byte) []byte {
 	return sum[:]
 }
 func (fw *FileWatcher) hashingRequired() bool {
-	now := time.Now()
+	now := fw.clock.Now()
 	elapsed := now.Sub(fw.lastHashingTime)
 	return elapsed > maxDurWithoutHashing
 }
