@@ -18,6 +18,10 @@ var (
 	mu      sync.Mutex
 	servers = map[string]*proxyServer{}
 	currCfg = config.ReverseProxyConfig{}
+
+	startServerAsyncFn    = func(ps *proxyServer) { go startServer(ps) }
+	shutdownServerAsyncFn = func(ps *proxyServer) { go shutdownServer(ps) }
+	shutdownServerSyncFn  = shutdownServer
 )
 
 // proxyServer represents a running HTTP server for a specific listener, along with its configuration and state needed for dynamic updates
@@ -215,21 +219,21 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 	for _, ps := range comparisonRes.toStart {
 		// start middlewares BEFORE server accepts requests
 		startMiddlewares(ps.middlewares, context.Background())
-		go startServer(ps)
+		startServerAsyncFn(ps)
 	}
 
 	for _, ps := range comparisonRes.toStop {
 		shutdownMiddlewares(ps.middlewares)
-		go shutdownServer(ps)
+		shutdownServerAsyncFn(ps)
 	}
 
 	// Server replacement — must stop old server and release port before starting new one
 	for _, rp := range comparisonRes.toReplace {
 		shutdownMiddlewares(rp.old.middlewares)
 		//sync shutdown to ensure port is released before new server starts
-		shutdownServer(rp.old)
+		shutdownServerSyncFn(rp.old)
 		startMiddlewares(rp.new.middlewares, context.Background())
-		go startServer(rp.new)
+		startServerAsyncFn(rp.new)
 	}
 
 	currCfg = *cfg
@@ -291,7 +295,7 @@ func shutdownAll() {
 	for _, ps := range old {
 		ps := ps
 		go func() {
-			shutdownServer(ps)
+			shutdownServerSyncFn(ps)
 			wg.Done()
 		}()
 	}
