@@ -6,6 +6,6 @@ listeners:
         upstream: "http://127.0.0.1:9100"
     rate_limit:
       enabled: true
-      requests: 100
+      requests: 100000
       window: 1s
       client_ttl: 5m

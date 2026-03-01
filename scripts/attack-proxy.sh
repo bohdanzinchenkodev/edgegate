@@ -67,5 +67,11 @@ echo ""
 echo "Latency histogram"
 vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$RESULT_CONTAINER"
 
+PLOT_CONTAINER="/data/proxy-via-edgegate.html"
+PLOT_FILE="$BENCH_DIR/proxy-via-edgegate.html"
+vegeta plot "$RESULT_CONTAINER" > "$PLOT_FILE"
+
 echo ""
 echo "Result saved: $RESULT_FILE"
+echo "Plot saved:   $PLOT_FILE"
+open "$PLOT_FILE" 2>/dev/null || true
