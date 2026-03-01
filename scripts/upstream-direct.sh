@@ -13,15 +13,23 @@ mkdir -p "$BENCH_DIR"
 RESULT_FILE="$BENCH_DIR/upstream-direct.bin"
 TARGETS_FILE=$(mktemp "$BENCH_DIR/targets-upstream.XXXXXX")
 
-if ! command -v vegeta >/dev/null 2>&1; then
-  echo "vegeta is required. Install it first."
-  exit 1
-fi
-
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required. Install it first."
   exit 1
 fi
+
+VEGETA_IMAGE="edgegate-vegeta"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if ! docker image inspect "$VEGETA_IMAGE" >/dev/null 2>&1; then
+  echo "Building vegeta docker image"
+  docker build -t "$VEGETA_IMAGE" "$ROOT_DIR/docker/vegeta"
+fi
+
+vegeta() {
+  docker run --rm --network=host -v "$BENCH_DIR:/data" "$VEGETA_IMAGE" "$@"
+}
 
 cleanup() {
   rm -f "$TARGETS_FILE"
@@ -49,22 +57,25 @@ echo "Running upstream-direct load test"
 echo "  target : http://$UPSTREAM_HOST:$UPSTREAM_PORT/get"
 echo "  rate   : $RATE  duration: $DURATION  workers: $WORKERS  connections: $CONNECTIONS"
 
+TARGETS_CONTAINER="/data/$(basename "$TARGETS_FILE")"
+RESULT_CONTAINER="/data/upstream-direct.bin"
+
 vegeta attack \
-  -targets="$TARGETS_FILE" \
+  -targets="$TARGETS_CONTAINER" \
   -rate="$RATE" \
   -duration="$DURATION" \
   -workers="$WORKERS" \
   -connections="$CONNECTIONS" \
   -keepalive=true \
-  > "$RESULT_FILE"
+  -output="$RESULT_CONTAINER"
 
 echo ""
 echo "Summary report"
-vegeta report "$RESULT_FILE"
+vegeta report "$RESULT_CONTAINER"
 
 echo ""
 echo "Latency histogram"
-vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$RESULT_FILE"
+vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$RESULT_CONTAINER"
 
 echo ""
 echo "Result saved: $RESULT_FILE"
