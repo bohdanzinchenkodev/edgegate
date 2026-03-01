@@ -1,0 +1,11 @@
+listeners:
+  - listen: ":8001"
+    routes:
+      - match:
+          host: "svc0.example.com"
+        upstream: "http://127.0.0.1:9100"
+    rate_limit:
+      enabled: true
+      requests: 100
+      window: 1s
+      client_ttl: 5m
