@@ -56,28 +56,28 @@ echo "Running upstream-direct load test"
 echo "  target : http://httpbin-direct:8080/get"
 echo "  rate   : $RATE  duration: $DURATION  workers: $WORKERS  connections: $CONNECTIONS"
 
-TARGETS_CONTAINER="/data/targets-upstream.txt"
-RESULT_CONTAINER="/data/upstream-direct.bin"
+VEGETA_TARGETS="/data/targets-upstream.txt"
+VEGETA_RESULT="/data/upstream-direct.bin"
 
 vegeta attack \
-  -targets="$TARGETS_CONTAINER" \
+  -targets="$VEGETA_TARGETS" \
   -rate="$RATE" \
   -duration="$DURATION" \
   -workers="$WORKERS" \
   -connections="$CONNECTIONS" \
   -keepalive=true \
-  -output="$RESULT_CONTAINER"
+  -output="$VEGETA_RESULT"
 
 echo ""
 echo "Summary report"
-vegeta report "$RESULT_CONTAINER"
+vegeta report "$VEGETA_RESULT"
 
 echo ""
 echo "Latency histogram"
-vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$RESULT_CONTAINER"
+vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$VEGETA_RESULT"
 
 PLOT_FILE="$BENCH_DIR/upstream-direct.html"
-vegeta plot "$RESULT_CONTAINER" > "$PLOT_FILE"
+vegeta plot "$VEGETA_RESULT" > "$PLOT_FILE"
 
 echo ""
 echo "Result saved: $RESULT_FILE"

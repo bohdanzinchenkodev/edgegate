@@ -31,8 +31,8 @@ trap cleanup EXIT
 
 printf 'GET http://%s:%s/get\nHost: %s\n\n' "$EDGEGATE_CONTAINER" "$PROXY_PORT" "$TARGET_HOST" > "$TARGETS_FILE"
 
-TARGETS_CONTAINER="/data/targets-proxy.txt"
-RESULT_CONTAINER="/data/proxy-via-edgegate.bin"
+VEGETA_TARGETS="/data/targets-proxy.txt"
+VEGETA_RESULT="/data/proxy-via-edgegate.bin"
 
 echo "Running proxy load test"
 echo "  target : http://$EDGEGATE_CONTAINER:$PROXY_PORT/get"
@@ -40,24 +40,24 @@ echo "  host   : $TARGET_HOST"
 echo "  rate   : $RATE  duration: $DURATION  workers: $WORKERS  connections: $CONNECTIONS"
 
 vegeta attack \
-  -targets="$TARGETS_CONTAINER" \
+  -targets="$VEGETA_TARGETS" \
   -rate="$RATE" \
   -duration="$DURATION" \
   -workers="$WORKERS" \
   -connections="$CONNECTIONS" \
   -keepalive=true \
-  -output="$RESULT_CONTAINER"
+  -output="$VEGETA_RESULT"
 
 echo ""
 echo "Summary report"
-vegeta report "$RESULT_CONTAINER"
+vegeta report "$VEGETA_RESULT"
 
 echo ""
 echo "Latency histogram"
-vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$RESULT_CONTAINER"
+vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$VEGETA_RESULT"
 
 PLOT_FILE="$BENCH_DIR/proxy-via-edgegate.html"
-vegeta plot "$RESULT_CONTAINER" > "$PLOT_FILE"
+vegeta plot "$VEGETA_RESULT" > "$PLOT_FILE"
 
 echo ""
 echo "Result saved: $RESULT_FILE"

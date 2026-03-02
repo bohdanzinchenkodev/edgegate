@@ -21,6 +21,7 @@ fi
 
 mkdir -p "$BENCH_DIR"
 CONFIG_FILE="$BENCH_DIR/edgegate.yaml"
+EDGEGATE_CONFIG="/etc/edgegate/edgegate.yaml"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required. Install it first."
@@ -66,7 +67,7 @@ docker run --rm -d \
   -p "$PROXY_PORT:$PROXY_PORT" \
   -v "$BENCH_DIR:/etc/edgegate" \
   "$EDGEGATE_IMAGE" \
-  -conf /etc/edgegate/edgegate.yaml \
+  -conf "$EDGEGATE_CONFIG" \
   > /dev/null
 
 echo "Waiting for proxy readiness"
