@@ -6,9 +6,19 @@ ROOT_DIR="$(cd "$BENCH_DIR_REL/.." && pwd)"
 
 source "$BENCH_DIR_REL/bench.env"
 
+if [ "${1:-}" = "--tls" ]; then
+  SCHEME="https"
+  INSECURE_FLAG="-insecure"
+  SUFFIX="-tls"
+else
+  SCHEME="http"
+  INSECURE_FLAG=""
+  SUFFIX=""
+fi
+
 mkdir -p "$BENCH_DIR"
-RESULT_FILE="$BENCH_DIR/proxy-via-edgegate.bin"
-TARGETS_FILE="$BENCH_DIR/targets-proxy.txt"
+RESULT_FILE="$BENCH_DIR/proxy-via-edgegate${SUFFIX}.bin"
+TARGETS_FILE="$BENCH_DIR/targets-proxy${SUFFIX}.txt"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required. Install it first."
@@ -29,13 +39,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf 'GET http://%s:%s/get\nHost: %s\n\n' "$EDGEGATE_CONTAINER" "$PROXY_PORT" "$TARGET_HOST" > "$TARGETS_FILE"
+printf 'GET %s://%s:%s/get\nHost: %s\n\n' "$SCHEME" "$EDGEGATE_CONTAINER" "$PROXY_PORT" "$TARGET_HOST" > "$TARGETS_FILE"
 
-VEGETA_TARGETS="/data/targets-proxy.txt"
-VEGETA_RESULT="/data/proxy-via-edgegate.bin"
+VEGETA_TARGETS="/data/targets-proxy${SUFFIX}.txt"
+VEGETA_RESULT="/data/proxy-via-edgegate${SUFFIX}.bin"
 
-echo "Running proxy load test"
-echo "  target : http://$EDGEGATE_CONTAINER:$PROXY_PORT/get"
+echo "Running proxy load test${SUFFIX:+ (TLS)}"
+echo "  target : $SCHEME://$EDGEGATE_CONTAINER:$PROXY_PORT/get"
 echo "  host   : $TARGET_HOST"
 echo "  rate   : $RATE  duration: $DURATION  workers: $WORKERS  connections: $CONNECTIONS"
 
@@ -46,6 +56,7 @@ vegeta attack \
   -workers="$WORKERS" \
   -connections="$CONNECTIONS" \
   -keepalive=true \
+  $INSECURE_FLAG \
   -output="$VEGETA_RESULT"
 
 echo ""
@@ -56,7 +67,7 @@ echo ""
 echo "Latency histogram"
 vegeta report -type='hist[0,1ms,2ms,5ms,10ms,20ms,50ms,100ms,200ms,500ms,1s]' "$VEGETA_RESULT"
 
-PLOT_FILE="$BENCH_DIR/proxy-via-edgegate.html"
+PLOT_FILE="$BENCH_DIR/proxy-via-edgegate${SUFFIX}.html"
 vegeta plot "$VEGETA_RESULT" > "$PLOT_FILE"
 
 echo ""

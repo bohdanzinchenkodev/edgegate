@@ -39,7 +39,7 @@ cleanup() {
   docker rm -f "$EDGEGATE_CONTAINER" >/dev/null 2>&1 || true
   docker rm -f httpbin-proxy >/dev/null 2>&1 || true
   docker network rm "$DOCKER_NETWORK" >/dev/null 2>&1 || true
-  rm -f "$CONFIG_FILE" >/dev/null 2>&1 || true
+  rm -f "$CONFIG_FILE" "$BENCH_DIR/tls.crt" "$BENCH_DIR/tls.key" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -57,6 +57,16 @@ until curl -sf "http://127.0.0.1:$UPSTREAM_PORT/get" >/dev/null 2>&1; do
   sleep 1
 done
 
+if [ "$VARIANT" = "tls" ]; then
+  echo "Generating self-signed TLS certificate"
+  openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "$BENCH_DIR/tls.key" \
+    -out "$BENCH_DIR/tls.crt" \
+    -days 1 -subj "/CN=$TARGET_HOST" \
+    -addext "subjectAltName=DNS:$TARGET_HOST" \
+    2>/dev/null
+fi
+
 export PROXY_PORT TARGET_HOST
 envsubst < "$SOURCE" > "$CONFIG_FILE"
 
@@ -70,9 +80,17 @@ docker run --rm -d \
   -conf "$EDGEGATE_CONFIG" \
   > /dev/null
 
+if [ "$VARIANT" = "tls" ]; then
+  SCHEME="https"
+  CURL_EXTRA="-k"
+else
+  SCHEME="http"
+  CURL_EXTRA=""
+fi
+
 echo "Waiting for proxy readiness"
 RETRIES=0
-until curl -sf -H "Host: $TARGET_HOST" "http://127.0.0.1:$PROXY_PORT/get" >/dev/null 2>&1; do
+until curl -sf $CURL_EXTRA -H "Host: $TARGET_HOST" "$SCHEME://127.0.0.1:$PROXY_PORT/get" >/dev/null 2>&1; do
   RETRIES=$((RETRIES + 1))
   if [ "$RETRIES" -ge 30 ]; then
     echo "proxy failed to start after 30s"
@@ -86,7 +104,7 @@ echo ""
 echo "Stack ready:"
 echo "  config variant  : $VARIANT"
 echo "  upstream direct : http://127.0.0.1:$UPSTREAM_PORT/get"
-echo "  via edgegate    : curl -H 'Host: $TARGET_HOST' http://127.0.0.1:$PROXY_PORT/get"
+echo "  via edgegate    : curl $CURL_EXTRA -H 'Host: $TARGET_HOST' $SCHEME://127.0.0.1:$PROXY_PORT/get"
 echo "  edgegate logs   : docker logs -f $EDGEGATE_CONTAINER"
 echo "  active config   : $CONFIG_FILE"
 echo ""

@@ -1,0 +1,10 @@
+listeners:
+  - listen: ":${PROXY_PORT}"
+    tls:
+      enabled: true
+      default_cert_file: "/etc/edgegate/tls.crt"
+      default_key_file: "/etc/edgegate/tls.key"
+    routes:
+      - match:
+          host: "${TARGET_HOST}"
+        upstream: "http://httpbin-proxy:8080"
