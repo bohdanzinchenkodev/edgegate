@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/http2"
+
 	"edgegate/internal/config"
 )
 
@@ -256,7 +258,9 @@ func startServer(ps *proxyServer) {
 		}
 		tlsLn := tls.NewListener(ln, &tls.Config{
 			GetCertificate: ps.tlsManager.GetCertificate,
+			NextProtos:     []string{"h2", "http/1.1"},
 		})
+		_ = http2.ConfigureServer(ps.server, nil)
 		err = ps.server.Serve(tlsLn)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Print(err)
