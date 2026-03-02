@@ -1,0 +1,6 @@
+listeners:
+  - listen: ":${PROXY_PORT}"
+    routes:
+      - match:
+          host: "${TARGET_HOST}"
+        upstream: "http://httpbin-proxy:8080"

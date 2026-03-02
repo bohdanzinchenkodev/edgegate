@@ -1,6 +1,0 @@
-listeners:
-  - listen: ":8001"
-    routes:
-      - match:
-          host: "svc0.example.com"
-        upstream: "http://127.0.0.1:9100"

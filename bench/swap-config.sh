@@ -1,10 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BENCH_CONFIG="${BENCH_CONFIG:-/tmp/edgegate-bench/edgegate.yaml}"
-VARIANTS_DIR="$ROOT_DIR/configs/bench"
+BENCH_DIR_REL="$(cd "$(dirname "$0")" && pwd)"
+
+source "$BENCH_DIR_REL/bench.env"
+
+VARIANTS_DIR="$BENCH_DIR_REL/configs"
+CONFIG_FILE="$BENCH_DIR/edgegate.yaml"
 
 VARIANT="${1:-}"
 if [ -z "$VARIANT" ]; then
@@ -19,7 +21,7 @@ fi
 
 SOURCE="$VARIANTS_DIR/${VARIANT}.yaml"
 if [ ! -f "$SOURCE" ]; then
-  echo "Variant not found: $SOURCE"
+  echo "Variant not found: $VARIANT"
   echo ""
   echo "Available variants:"
   for f in "$VARIANTS_DIR"/*.yaml; do
@@ -28,5 +30,6 @@ if [ ! -f "$SOURCE" ]; then
   exit 1
 fi
 
-cp "$SOURCE" "$BENCH_CONFIG"
-echo "Config swapped to '$VARIANT' ($BENCH_CONFIG)"
+export PROXY_PORT TARGET_HOST
+envsubst < "$SOURCE" > "$CONFIG_FILE"
+echo "Config swapped to '$VARIANT' ($CONFIG_FILE)"

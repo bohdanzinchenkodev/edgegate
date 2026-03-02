@@ -1,0 +1,11 @@
+listeners:
+  - listen: ":${PROXY_PORT}"
+    routes:
+      - match:
+          host: "${TARGET_HOST}"
+        upstream: "http://httpbin-proxy:8080"
+    rate_limit:
+      enabled: true
+      requests: 1000
+      window: 1s
+      client_ttl: 5m
