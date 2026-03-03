@@ -12,18 +12,18 @@ func validate(cfg ReverseProxyConfig) error {
 		}
 
 		// tls validation
-		if l.Tls.Enabled {
-			hasDefault := l.Tls.DefaultCertFile != "" && l.Tls.DefaultKeyFile != ""
-			if !hasDefault && len(l.Tls.Certificates) == 0 {
+		if l.TLS.Enabled {
+			hasDefault := l.TLS.DefaultCertFile != "" && l.TLS.DefaultKeyFile != ""
+			if !hasDefault && len(l.TLS.Certificates) == 0 {
 				return errors.New("TLS enabled for listener " + l.Listen + ": provide certificates or default cert/key")
 			}
 
-			if (l.Tls.DefaultCertFile == "") != (l.Tls.DefaultKeyFile == "") {
+			if (l.TLS.DefaultCertFile == "") != (l.TLS.DefaultKeyFile == "") {
 				return errors.New("default TLS cert and key must both be set or both be empty")
 			}
 
-			certHosts := make(map[string]struct{}, len(l.Tls.Certificates))
-			for _, c := range l.Tls.Certificates {
+			certHosts := make(map[string]struct{}, len(l.TLS.Certificates))
+			for _, c := range l.TLS.Certificates {
 				if c.Hostname == "" {
 					return errors.New("hostname must be set for TLS certificate entry in listener " + l.Listen)
 				}

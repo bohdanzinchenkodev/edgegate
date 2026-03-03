@@ -130,7 +130,7 @@ func (rl *RateLimiter) ServerShutdown() {
 }
 func (rl *RateLimiter) WrapHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key, err := rl.resolveIp(r)
+		key, err := rl.resolveIP(r)
 		if err != nil {
 			http.Error(w, "cannot resolve IP", http.StatusInternalServerError)
 			return
@@ -169,7 +169,7 @@ func (rl *RateLimiter) cleanupTick() {
 		return true
 	})
 }
-func (rl *RateLimiter) resolveIp(r *http.Request) (string, error) {
+func (rl *RateLimiter) resolveIP(r *http.Request) (string, error) {
 
 	//get ip without port
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
@@ -186,9 +186,9 @@ func (rl *RateLimiter) resolveIp(r *http.Request) (string, error) {
 
 	if isIPInTrustedProxyRanges(addr, rl.trustedProxies) {
 		// Check X-Real-Ip and X-Forwarded-For headers
-		xRealIp := r.Header.Get("X-Real-Ip")
-		//validate xRealIp
-		xRealAddr, err := netip.ParseAddr(xRealIp)
+		xRealIP := r.Header.Get("X-Real-Ip")
+		//validate xRealIP
+		xRealAddr, err := netip.ParseAddr(xRealIP)
 		if err == nil {
 			return xRealAddr.StringExpanded(), nil
 		}
@@ -197,9 +197,9 @@ func (rl *RateLimiter) resolveIp(r *http.Request) (string, error) {
 		ips := strings.Split(xForwardedFor, ",")
 		if len(ips) > 0 {
 			//get first ip
-			xForwardedIp := strings.TrimSpace(ips[0])
-			//validate xForwardedIp
-			xForwardedAddr, err := netip.ParseAddr(xForwardedIp)
+			xForwardedIP := strings.TrimSpace(ips[0])
+			//validate xForwardedIP
+			xForwardedAddr, err := netip.ParseAddr(xForwardedIP)
 			if err == nil {
 				return xForwardedAddr.StringExpanded(), nil
 			}

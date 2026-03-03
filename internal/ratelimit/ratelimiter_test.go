@@ -88,7 +88,7 @@ func TestResolveIP_NoTrustedProxies_ReturnsRemoteAddrExpanded_IPv4(t *testing.T)
 
 	r := newReq("203.0.113.5:12345", nil)
 
-	got, err := rl.resolveIp(r)
+	got, err := rl.resolveIP(r)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -106,7 +106,7 @@ func TestResolveIP_NoTrustedProxies_ReturnsRemoteAddrExpanded_IPv6(t *testing.T)
 
 	r := newReq("[2001:db8::1]:443", nil)
 
-	got, err := rl.resolveIp(r)
+	got, err := rl.resolveIP(r)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -127,7 +127,7 @@ func TestResolveIP_TrustedProxy_UsesXRealIP_WhenValid(t *testing.T) {
 		"X-Real-Ip": "198.51.100.42",
 	})
 
-	got, err := rl.resolveIp(r)
+	got, err := rl.resolveIP(r)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -148,7 +148,7 @@ func TestResolveIP_TrustedProxy_XRealIPInvalid_FallsBackToXForwardedForFirstIP(t
 		"X-Forwarded-For": "198.51.100.42, 192.0.2.9",
 	})
 
-	got, err := rl.resolveIp(r)
+	got, err := rl.resolveIP(r)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -169,7 +169,7 @@ func TestResolveIP_TrustedProxy_HeadersInvalid_ReturnsRemoteAddr(t *testing.T) {
 		"X-Forwarded-For": "also-not-an-ip, 123",
 	})
 
-	got, err := rl.resolveIp(r)
+	got, err := rl.resolveIP(r)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -191,7 +191,7 @@ func TestResolveIP_NotTrustedProxy_IgnoresForwardedHeaders_ReturnsRemoteAddr(t *
 		"X-Forwarded-For": "203.0.113.5, 192.0.2.9",
 	})
 
-	got, err := rl.resolveIp(r)
+	got, err := rl.resolveIP(r)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -266,7 +266,7 @@ func TestResolveIP_RemoteAddrWithoutPort_ReturnsError(t *testing.T) {
 	// so ip becomes "", ParseAddr("") errors.
 	r := newReq("203.0.113.5", nil)
 
-	_, err := rl.resolveIp(r)
+	_, err := rl.resolveIP(r)
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

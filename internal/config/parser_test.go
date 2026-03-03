@@ -68,7 +68,7 @@ func TestParseConfig_MissingOptionalSectionsReturnsObjectWithZeroValues(t *testi
 	}
 
 	l := cfg.Listeners[0]
-	if l.Tls.Enabled {
+	if l.TLS.Enabled {
 		t.Fatalf("expected tls.enabled to default to false")
 	}
 	if l.RateLimit.Enabled {

@@ -20,17 +20,17 @@ type certEntry struct {
 	cert string
 }
 
-func compileTlsManager(l config.Listener) *tlsManager {
-	if !l.Tls.Enabled {
+func compileTLSManager(l config.Listener) *tlsManager {
+	if !l.TLS.Enabled {
 		return nil
 	}
 
-	if len(l.Tls.Certificates) == 0 && l.Tls.DefaultCertFile == "" {
+	if len(l.TLS.Certificates) == 0 && l.TLS.DefaultCertFile == "" {
 		return nil
 	}
-	if len(l.Tls.Certificates) > 0 {
-		certs := make(map[string]certEntry, len(l.Tls.Certificates))
-		for _, c := range l.Tls.Certificates {
+	if len(l.TLS.Certificates) > 0 {
+		certs := make(map[string]certEntry, len(l.TLS.Certificates))
+		for _, c := range l.TLS.Certificates {
 			certs[c.Hostname] = certEntry{
 				key:  c.KeyFile,
 				cert: c.CertFile,
@@ -40,8 +40,8 @@ func compileTlsManager(l config.Listener) *tlsManager {
 	}
 	return &tlsManager{certs: map[string]certEntry{
 		DefaultCertKey: {
-			key:  l.Tls.DefaultKeyFile,
-			cert: l.Tls.DefaultCertFile,
+			key:  l.TLS.DefaultKeyFile,
+			cert: l.TLS.DefaultCertFile,
 		},
 	}}
 }

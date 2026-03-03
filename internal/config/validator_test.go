@@ -37,7 +37,7 @@ func TestValidate_TLSEnabledWithoutDefaultOrCertificatesReturnsError(t *testing.
 		Listeners: []Listener{
 			{
 				Listen: ":8080",
-				Tls: TLSConfig{
+				TLS: TLSConfig{
 					Enabled: true,
 				},
 				Routes: []Route{
@@ -61,7 +61,7 @@ func TestValidate_TLSEnabledWithoutDefaultAndMissingHostCertReturnsError(t *test
 		Listeners: []Listener{
 			{
 				Listen: ":8080",
-				Tls: TLSConfig{
+				TLS: TLSConfig{
 					Enabled: true,
 					Certificates: []CertEntry{
 						{
@@ -92,7 +92,7 @@ func TestValidate_TLSEnabledWithDefaultCertAllowsRouteWithoutHost(t *testing.T) 
 		Listeners: []Listener{
 			{
 				Listen: ":8080",
-				Tls: TLSConfig{
+				TLS: TLSConfig{
 					Enabled:         true,
 					DefaultCertFile: "./default.pem",
 					DefaultKeyFile:  "./default.key",

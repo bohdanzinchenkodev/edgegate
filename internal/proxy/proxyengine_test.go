@@ -93,9 +93,9 @@ func TestApplyConfig_TLSToggleReplacesServerInstance(t *testing.T) {
 	}
 
 	newListener := newListenerForTest(":0", "http://127.0.0.1:9011")
-	newListener.Tls.Enabled = true
-	newListener.Tls.DefaultCertFile = "./missing-cert.pem"
-	newListener.Tls.DefaultKeyFile = "./missing-key.pem"
+	newListener.TLS.Enabled = true
+	newListener.TLS.DefaultCertFile = "./missing-cert.pem"
+	newListener.TLS.DefaultKeyFile = "./missing-key.pem"
 	newCfg := &config.ReverseProxyConfig{Listeners: []config.Listener{newListener}}
 
 	applyConfig(newCfg)
@@ -230,9 +230,9 @@ func TestCompareConfigs_TLSTogglePlansReplace(t *testing.T) {
 
 	oldListener := newListenerForTest(":18084", "http://127.0.0.1:9005")
 	newListener := newListenerForTest(":18084", "http://127.0.0.1:9005")
-	newListener.Tls.Enabled = true
-	newListener.Tls.DefaultCertFile = "./new-cert.pem"
-	newListener.Tls.DefaultKeyFile = "./new-key.pem"
+	newListener.TLS.Enabled = true
+	newListener.TLS.DefaultCertFile = "./new-cert.pem"
+	newListener.TLS.DefaultKeyFile = "./new-key.pem"
 	servers[oldListener.Listen] = mustProxyServerForListener(t, oldListener)
 
 	oldCfg := &config.ReverseProxyConfig{Listeners: []config.Listener{oldListener}}
@@ -252,13 +252,13 @@ func TestCompareConfigs_TLSCertChangePlansUpdate(t *testing.T) {
 	resetEngineStateForTest()
 
 	oldListener := newListenerForTest(":18085", "http://127.0.0.1:9006")
-	oldListener.Tls.Enabled = true
-	oldListener.Tls.DefaultCertFile = "./old-cert.pem"
-	oldListener.Tls.DefaultKeyFile = "./old-key.pem"
+	oldListener.TLS.Enabled = true
+	oldListener.TLS.DefaultCertFile = "./old-cert.pem"
+	oldListener.TLS.DefaultKeyFile = "./old-key.pem"
 
 	newListener := oldListener
-	newListener.Tls.DefaultCertFile = "./new-cert.pem"
-	newListener.Tls.DefaultKeyFile = "./new-key.pem"
+	newListener.TLS.DefaultCertFile = "./new-cert.pem"
+	newListener.TLS.DefaultKeyFile = "./new-key.pem"
 
 	servers[oldListener.Listen] = mustProxyServerForListener(t, oldListener)
 
@@ -350,7 +350,7 @@ func mustProxyServerForListener(t *testing.T, l config.Listener) *proxyServer {
 		t.Fatalf("compileRouter: %v", err)
 	}
 	mws := compileMiddlewares(l)
-	tm := compileTlsManager(l)
+	tm := compileTLSManager(l)
 	return newProxyServer(l, pr, mws, tm)
 }
 

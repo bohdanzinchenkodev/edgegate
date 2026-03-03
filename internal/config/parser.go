@@ -13,7 +13,7 @@ type Listener struct {
 	Listen    string          `yaml:"listen"`
 	Routes    []Route         `yaml:"routes"`
 	RateLimit rateLimitPolicy `yaml:"rate_limit"`
-	Tls       TLSConfig       `yaml:"tls"`
+	TLS       TLSConfig       `yaml:"tls"`
 }
 type Route struct {
 	Match    Match  `yaml:"match"`

@@ -87,7 +87,7 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 			continue
 		}
 		middlewares := compileMiddlewares(l)
-		tlsCfg := compileTlsManager(l)
+		tlsCfg := compileTLSManager(l)
 		ps, exists := servers[l.Listen]
 		if !exists {
 			// New listener — create and mark for start

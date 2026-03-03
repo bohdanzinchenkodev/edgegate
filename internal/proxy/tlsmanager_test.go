@@ -19,7 +19,7 @@ import (
 func TestCompileTlsManager_DisabledReturnsNil(t *testing.T) {
 	l := config.Listener{}
 
-	tm := compileTlsManager(l)
+	tm := compileTLSManager(l)
 	if tm != nil {
 		t.Fatalf("expected nil tls manager when TLS is disabled")
 	}
@@ -27,11 +27,11 @@ func TestCompileTlsManager_DisabledReturnsNil(t *testing.T) {
 
 func TestCompileTlsManager_DefaultCertBuildsDefaultEntry(t *testing.T) {
 	l := config.Listener{}
-	l.Tls.Enabled = true
-	l.Tls.DefaultCertFile = "./default.pem"
-	l.Tls.DefaultKeyFile = "./default.key"
+	l.TLS.Enabled = true
+	l.TLS.DefaultCertFile = "./default.pem"
+	l.TLS.DefaultKeyFile = "./default.key"
 
-	tm := compileTlsManager(l)
+	tm := compileTLSManager(l)
 	if tm == nil {
 		t.Fatalf("expected tls manager")
 	}
@@ -46,13 +46,13 @@ func TestCompileTlsManager_DefaultCertBuildsDefaultEntry(t *testing.T) {
 
 func TestCompileTlsManager_HostCertificatesBuildEntries(t *testing.T) {
 	l := config.Listener{}
-	l.Tls.Enabled = true
-	l.Tls.Certificates = []config.CertEntry{
+	l.TLS.Enabled = true
+	l.TLS.Certificates = []config.CertEntry{
 		{Hostname: "api.example.com", CertFile: "./api.pem", KeyFile: "./api.key"},
 		{Hostname: "www.example.com", CertFile: "./www.pem", KeyFile: "./www.key"},
 	}
 
-	tm := compileTlsManager(l)
+	tm := compileTLSManager(l)
 	if tm == nil {
 		t.Fatalf("expected tls manager")
 	}
