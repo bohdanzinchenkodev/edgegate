@@ -135,7 +135,6 @@ func (rl *RateLimiter) WrapHandler(next http.Handler) http.Handler {
 			http.Error(w, "cannot resolve IP", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("Resolved key: %s", key)
 		if !rl.AllowReq(key) {
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return

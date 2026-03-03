@@ -65,8 +65,6 @@ func (pr *proxyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	log.Printf("No matching route for host=%s path=%s\n", host, path)
 	http.Error(w, "Bad Gateway", http.StatusBadGateway)
 }
 func (pr *proxyRouter) Equal(other *proxyRouter) bool {

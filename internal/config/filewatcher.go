@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"log"
 	"os"
 	"time"
 )
@@ -153,7 +152,6 @@ func (fw *FileWatcher) checkOnce() ([]byte, error) {
 
 	//if metadata is the same and time that passed doesn't require us to check the content, then just skip
 	if newModTime == fw.lastFileModTime && newSize == fw.lastSize && !fw.hashingRequired() {
-		log.Println("file stayed the same")
 		return nil, nil
 	}
 
@@ -163,7 +161,6 @@ func (fw *FileWatcher) checkOnce() ([]byte, error) {
 		return nil, err
 	}
 
-	log.Println("hashing...")
 	fw.lastHashingTime = fw.clock.Now()
 	hash := fw.getNewHash(fileData)
 	//check if the file was changed
@@ -172,7 +169,6 @@ func (fw *FileWatcher) checkOnce() ([]byte, error) {
 	}
 	//the file was changed
 	//update fields
-	log.Println("file changed")
 	fw.update(newModTime, newSize, hash)
 	return fileData, nil
 }
