@@ -109,7 +109,7 @@ func (rl *RateLimiter) AllowReq(key string) bool {
 	if !ok {
 		return false
 	}
-	// set expiry date for bucket
+	// Set expiry time for the bucket.
 	v.mux.Lock()
 	v.expireAt = rl.clock.Now().Add(rl.deleteAfter)
 	v.mux.Unlock()
@@ -171,9 +171,9 @@ func (rl *RateLimiter) cleanupTick() {
 }
 func (rl *RateLimiter) resolveIP(r *http.Request) (string, error) {
 
-	//get ip without port
+	// Parse remote IP without port.
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	//validate ip and parse to netip.Addr
+	// Validate and parse to netip.Addr.
 	addr, err := netip.ParseAddr(ip)
 	if err != nil {
 		log.Printf("Invalid IP address %s: %v", ip, err)
@@ -185,9 +185,8 @@ func (rl *RateLimiter) resolveIP(r *http.Request) (string, error) {
 	}
 
 	if isIPInTrustedProxyRanges(addr, rl.trustedProxies) {
-		// Check X-Real-Ip and X-Forwarded-For headers
 		xRealIP := r.Header.Get("X-Real-Ip")
-		//validate xRealIP
+		// Validate X-Real-Ip first.
 		xRealAddr, err := netip.ParseAddr(xRealIP)
 		if err == nil {
 			return xRealAddr.StringExpanded(), nil
@@ -196,16 +195,15 @@ func (rl *RateLimiter) resolveIP(r *http.Request) (string, error) {
 		xForwardedFor := r.Header.Get("X-Forwarded-For")
 		ips := strings.Split(xForwardedFor, ",")
 		if len(ips) > 0 {
-			//get first ip
+			// Fall back to first X-Forwarded-For entry.
 			xForwardedIP := strings.TrimSpace(ips[0])
-			//validate xForwardedIP
 			xForwardedAddr, err := netip.ParseAddr(xForwardedIP)
 			if err == nil {
 				return xForwardedAddr.StringExpanded(), nil
 			}
 		}
 	}
-	//return remote addr if no valid headers found
+	// Return remote address if no valid forwarded header is available.
 	return addr.StringExpanded(), nil
 }
 

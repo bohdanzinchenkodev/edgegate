@@ -15,7 +15,7 @@ import (
 	"edgegate/internal/config"
 )
 
-// Global state for running proxy servers
+// Global state for running proxy servers.
 var (
 	mu      sync.Mutex
 	servers = map[string]*proxyServer{}
@@ -39,7 +39,7 @@ type compareConfigsResult struct {
 	toStop    []*proxyServer
 	toStart   []*proxyServer
 	toUpdate  []*toUpdateServer
-	toReplace []*toReplaceServer // server must be fully replaced (e.g. TLS toggled) — stop old, then start new sequentially
+	toReplace []*toReplaceServer // Full replace required (for example, TLS toggled).
 }
 type toUpdateServer struct {
 	ps            *proxyServer
@@ -73,13 +73,13 @@ func newProxyServer(l config.Listener, pr *proxyRouter, middlewares []HandlerMid
 func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsResult {
 	result := compareConfigsResult{}
 
-	// Build map from old config, keyed by listen address
+	// Build map from old config, keyed by listen address.
 	oldMap := make(map[string]config.Listener, len(oldCfg.Listeners))
 	for _, l := range oldCfg.Listeners {
 		oldMap[l.Listen] = l
 	}
 
-	// Iterate new config: find added + updated
+	// Iterate new config: find added and updated listeners.
 	for _, l := range newCfg.Listeners {
 		pr, err := compileRouter(l)
 		if err != nil {
@@ -90,7 +90,7 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 		tlsCfg := compileTLSManager(l)
 		ps, exists := servers[l.Listen]
 		if !exists {
-			// New listener — create and mark for start
+			// New listener.
 			log.Printf("[config] listener %s: added", l.Listen)
 
 			ps = newProxyServer(l, pr, middlewares, tlsCfg)
@@ -99,10 +99,10 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 			result.toStart = append(result.toStart, ps)
 		} else {
 
-			// Remove from oldMap to mark as processed
+			// Remove from oldMap to mark as processed.
 			delete(oldMap, l.Listen)
 
-			// Conditions that require full server replacement (can't update in-place)
+			// Conditions requiring full server replacement.
 			needsReplace := (tlsCfg == nil) != (ps.tlsManager == nil) // TLS toggled on/off
 			if needsReplace {
 				log.Printf("[config] listener %s: replacing server", l.Listen)
@@ -117,19 +117,18 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 
 			var handler http.Handler
 			var newRouter *proxyRouter
-			// Check if routes changed to decide if we can reuse old router or need to replace with new one
+			// Reuse current router when routes are unchanged.
 			routesChanged := !pr.Equal(ps.router)
 			if routesChanged {
 				log.Printf("[config] listener %s: routes changed", l.Listen)
 				handler = pr
 				newRouter = pr
 			} else {
-				//if routes didn't change then we reuse router
 				handler = ps.router
 				newRouter = ps.router
 			}
 
-			// we want to reuse old middlewares if they are the same (e.g. rate limiter with the same config) to avoid unnecessary resets and state loss
+			// Reuse unchanged middleware instances to preserve state.
 			diff := buildMiddlewareDiff(middlewares, ps.middlewares, l.Listen)
 			middlewaresChanged := len(diff.toStop) > 0 || len(diff.toStart) > 0
 			tlsChanged := !tlsCfg.Equal(ps.tlsManager)
@@ -140,7 +139,7 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 
 			if !routesChanged && !middlewaresChanged && !tlsChanged {
 				log.Printf("[config] listener %s: no changes detected", l.Listen)
-				continue // no changes, skip
+				continue
 			}
 
 			log.Printf("[config] listener %s: updating (routes=%v middlewares=%v tls=%v)", l.Listen, routesChanged, middlewaresChanged, tlsChanged)
@@ -160,7 +159,7 @@ func compareConfigs(oldCfg, newCfg *config.ReverseProxyConfig) compareConfigsRes
 		}
 	}
 
-	// Remaining in oldMap were removed
+	// Remaining entries in oldMap were removed.
 	for addr := range oldMap {
 		if ps, exists := servers[addr]; exists {
 			log.Printf("[config] listener %s: removed", addr)
@@ -188,8 +187,7 @@ func StartEngine(ctx context.Context, configPath string) {
 	fw.ErrorHandler = func(err error) { log.Print(err) }
 
 	fw.Watch(ctx)
-	//watch returns when ctx.Done()
-	//it means we should shut down all servers
+	// Watch returns when ctx is done.
 	shutdownAll()
 }
 
@@ -201,15 +199,15 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 	comparisonRes := compareConfigs(&currCfg, cfg)
 
 	for _, upd := range comparisonRes.toUpdate {
-		// start new middlewares BEFORE making handler live
+		// Start new middlewares before making handler live.
 		startMiddlewares(upd.mwDiff.toStart, context.Background())
 		handler := buildHandlerWithMiddlewares(upd.handler, upd.mwDiff.current)
 		upd.ps.handlerWrapper.Update(handler)
-		// shutdown old middlewares AFTER handler is swapped
+		// Stop old middlewares after handler swap.
 		shutdownMiddlewares(upd.mwDiff.toStop)
 		upd.ps.middlewares = upd.mwDiff.current
 		upd.ps.router = upd.newRouter
-		// reload TLS certs if changed — new connections will use new certs
+		// Reload TLS certs if changed.
 		if upd.newTlsManager != nil {
 			err := upd.ps.tlsManager.Reload(upd.newTlsManager.certs)
 			if err != nil {
@@ -219,7 +217,7 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 	}
 
 	for _, ps := range comparisonRes.toStart {
-		// start middlewares BEFORE server accepts requests
+		// Start middlewares before server accepts requests.
 		startMiddlewares(ps.middlewares, context.Background())
 		startServerAsyncFn(ps)
 	}
@@ -229,10 +227,10 @@ func applyConfig(cfg *config.ReverseProxyConfig) {
 		shutdownServerAsyncFn(ps)
 	}
 
-	// Server replacement — must stop old server and release port before starting new one
+	// Replacement requires old server stop before new server start.
 	for _, rp := range comparisonRes.toReplace {
 		shutdownMiddlewares(rp.old.middlewares)
-		//sync shutdown to ensure port is released before new server starts
+		// Sync shutdown ensures the port is released first.
 		shutdownServerSyncFn(rp.old)
 		startMiddlewares(rp.new.middlewares, context.Background())
 		startServerAsyncFn(rp.new)
@@ -287,13 +285,13 @@ func shutdownAll() {
 	mu.Lock()
 	old := servers
 	servers = map[string]*proxyServer{}
-	// shutdown middlewares while holding lock (protects ps.middlewares access)
+	// Shutdown middlewares while holding lock.
 	for _, ps := range old {
 		shutdownMiddlewares(ps.middlewares)
 	}
 	mu.Unlock()
 
-	// shutdown HTTP servers in parallel (no lock needed - doesn't access middlewares)
+	// Shutdown HTTP servers in parallel.
 	var wg sync.WaitGroup
 	wg.Add(len(old))
 	for _, ps := range old {

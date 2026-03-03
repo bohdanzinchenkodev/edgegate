@@ -56,11 +56,9 @@ func (proxy *EdgeGateProxy) getErrorHandler() func(http.ResponseWriter, *http.Re
 	}
 }
 func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	//log.Printf("Proxying request: %s %s%s to upstream %s\n", req.Method, req.Host, req.URL.Path, proxy.upstream)
 	if proxy.Transport == nil {
 		proxy.Transport = defaultTransport
 	}
-	//copy values from original request
 	oldHost := req.Host
 	ip, _, err := net.SplitHostPort(req.RemoteAddr)
 	if err != nil {
@@ -71,7 +69,6 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		oldScheme = "https"
 	}
 
-	//clone request
 	ctx := req.Context()
 	outreq := req.Clone(ctx)
 	if proxy.Prefix != "" {
@@ -80,7 +77,6 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	if proxy.ReplaceHostToUpstream {
 		outreq.Host = proxy.upstream.Host
 	}
-	//add x-forwarded headers
 	if prior := outreq.Header.Get("X-Forwarded-For"); prior != "" {
 		outreq.Header.Set("X-Forwarded-For", prior+", "+ip)
 	} else {
@@ -88,7 +84,6 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	}
 	outreq.Header.Set("X-Forwarded-Host", oldHost)
 	outreq.Header.Set("X-Forwarded-Proto", oldScheme)
-	//modify request to point to upstream
 	outreq.URL.Host = proxy.upstream.Host
 	outreq.URL.Scheme = proxy.upstream.Scheme
 
@@ -106,8 +101,6 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		outreq.Header.Set("Connection", "upgrade")
 		outreq.Header.Set("Upgrade", upgradeHeader)
 	}
-	//send request
-	//log.Printf("Outgoing request: %s %s%s to upstream %s\n", outreq.Method, outreq.Host, outreq.URL.Path, proxy.upstream)
 	res, err := proxy.Transport.RoundTrip(outreq)
 	errorHandler := proxy.getErrorHandler()
 	if err != nil {
@@ -122,7 +115,6 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		}
 		return
 	}
-	//copy headers
 	header := w.Header()
 	copyHeader(header, res.Header, "")
 	removeHopByHopHeaders(header)
@@ -136,7 +128,6 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		w.Header().Add("Trailer", strings.Join(trailerKeys, ", "))
 	}
 
-	//write response
 	w.WriteHeader(res.StatusCode)
 
 	isStream := isStreaming(res)
@@ -144,7 +135,6 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	if isStream {
 		if f, ok := w.(http.Flusher); ok {
 			fl = f
-			//flush headers
 			fl.Flush()
 		} else {
 			isStream = false
@@ -163,7 +153,6 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		errorHandler(w, req, err)
 		return
 	}
-	//write trailers
 	prefix := ""
 	if announcedTrailers > 0 {
 		prefix = http.TrailerPrefix
@@ -226,7 +215,7 @@ func copyStream(dst, src io.ReadWriter, errch chan error) {
 		errch <- err
 		return
 	}
-	// user conn has reached EOF so propogate close write to backend conn
+	// User connection reached EOF, so propagate close-write to backend.
 	if wc, ok := dst.(interface{ CloseWrite() error }); ok {
 		errch <- wc.CloseWrite()
 		return

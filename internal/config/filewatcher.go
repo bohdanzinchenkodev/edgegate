@@ -150,12 +150,11 @@ func (fw *FileWatcher) checkOnce() ([]byte, error) {
 		return fileData, nil
 	}
 
-	//if metadata is the same and time that passed doesn't require us to check the content, then just skip
+	// Skip hashing when metadata is unchanged and periodic hash check is not due.
 	if newModTime == fw.lastFileModTime && newSize == fw.lastSize && !fw.hashingRequired() {
 		return nil, nil
 	}
 
-	//make sure that content was actually changed
 	fileData, err := fw.getContent()
 	if err != nil {
 		return nil, err
@@ -163,12 +162,10 @@ func (fw *FileWatcher) checkOnce() ([]byte, error) {
 
 	fw.lastHashingTime = fw.clock.Now()
 	hash := fw.getNewHash(fileData)
-	//check if the file was changed
 	if bytes.Equal(hash, fw.lastHash) {
 		return nil, nil
 	}
-	//the file was changed
-	//update fields
+
 	fw.update(newModTime, newSize, hash)
 	return fileData, nil
 }

@@ -11,7 +11,7 @@ func validate(cfg ReverseProxyConfig) error {
 			return errors.New("duplicate listener address: " + l.Listen)
 		}
 
-		// tls validation
+		// TLS validation.
 		if l.TLS.Enabled {
 			hasDefault := l.TLS.DefaultCertFile != "" && l.TLS.DefaultKeyFile != ""
 			if !hasDefault && len(l.TLS.Certificates) == 0 {
@@ -45,7 +45,7 @@ func validate(cfg ReverseProxyConfig) error {
 			}
 		}
 
-		//rate limit validation
+		// Rate limit validation.
 		if l.RateLimit.Enabled {
 			if l.RateLimit.ClientTTL < 0 {
 				return errors.New("invalid rate limit config for listener " + l.Listen + ": client_ttl must be >= 0")
@@ -56,7 +56,7 @@ func validate(cfg ReverseProxyConfig) error {
 			}
 		}
 
-		//route validation
+		// Route validation.
 		for _, r := range l.Routes {
 			if r.Upstream == "" {
 				return errors.New("upstream must be set for all routes in listener " + l.Listen)
