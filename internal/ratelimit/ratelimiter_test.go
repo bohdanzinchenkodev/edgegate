@@ -83,7 +83,7 @@ func newReq(remoteAddr string, headers map[string]string) *http.Request {
 	return r
 }
 
-func TestResolveIP_NoTrustedProxies_ReturnsRemoteAddrExpanded_IPv4(t *testing.T) {
+func TestResolveIP_NoTrustedProxiesReturnsRemoteAddrExpandedIPv4(t *testing.T) {
 	rl := &RateLimiter{trustedProxies: nil}
 
 	r := newReq("203.0.113.5:12345", nil)
@@ -101,7 +101,7 @@ func TestResolveIP_NoTrustedProxies_ReturnsRemoteAddrExpanded_IPv4(t *testing.T)
 	}
 }
 
-func TestResolveIP_NoTrustedProxies_ReturnsRemoteAddrExpanded_IPv6(t *testing.T) {
+func TestResolveIP_NoTrustedProxiesReturnsRemoteAddrExpandedIPv6(t *testing.T) {
 	rl := &RateLimiter{trustedProxies: nil}
 
 	r := newReq("[2001:db8::1]:443", nil)
@@ -118,7 +118,7 @@ func TestResolveIP_NoTrustedProxies_ReturnsRemoteAddrExpanded_IPv6(t *testing.T)
 	}
 }
 
-func TestResolveIP_TrustedProxy_UsesXRealIP_WhenValid(t *testing.T) {
+func TestResolveIP_TrustedProxyUsesXRealIPWhenValid(t *testing.T) {
 	rl := &RateLimiter{
 		trustedProxies: []string{"203.0.113.0/24"},
 	}
@@ -138,7 +138,7 @@ func TestResolveIP_TrustedProxy_UsesXRealIP_WhenValid(t *testing.T) {
 	}
 }
 
-func TestResolveIP_TrustedProxy_XRealIPInvalid_FallsBackToXForwardedForFirstIP(t *testing.T) {
+func TestResolveIP_TrustedProxyXRealIPInvalidFallsBackToXForwardedForFirstIP(t *testing.T) {
 	rl := &RateLimiter{
 		trustedProxies: []string{"203.0.113.0/24"},
 	}
@@ -159,7 +159,7 @@ func TestResolveIP_TrustedProxy_XRealIPInvalid_FallsBackToXForwardedForFirstIP(t
 	}
 }
 
-func TestResolveIP_TrustedProxy_HeadersInvalid_ReturnsRemoteAddr(t *testing.T) {
+func TestResolveIP_TrustedProxyHeadersInvalidReturnsRemoteAddr(t *testing.T) {
 	rl := &RateLimiter{
 		trustedProxies: []string{"203.0.113.0/24"},
 	}
@@ -180,7 +180,7 @@ func TestResolveIP_TrustedProxy_HeadersInvalid_ReturnsRemoteAddr(t *testing.T) {
 	}
 }
 
-func TestResolveIP_NotTrustedProxy_IgnoresForwardedHeaders_ReturnsRemoteAddr(t *testing.T) {
+func TestResolveIP_NotTrustedProxyIgnoresForwardedHeadersReturnsRemoteAddr(t *testing.T) {
 	rl := &RateLimiter{
 		trustedProxies: []string{"203.0.113.0/24"},
 	}
@@ -259,7 +259,7 @@ func BenchmarkAllowReq_Parallel_1M(b *testing.B) {
 	})
 }
 
-func TestResolveIP_RemoteAddrWithoutPort_ReturnsError(t *testing.T) {
+func TestResolveIP_RemoteAddrWithoutPortReturnsError(t *testing.T) {
 	rl := &RateLimiter{trustedProxies: nil}
 
 	// This will make SplitHostPort fail, but your code ignores the error
