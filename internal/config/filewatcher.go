@@ -20,7 +20,6 @@ type clock interface {
 }
 
 type realClock struct {
-	now time.Time
 }
 
 func (rc *realClock) Now() time.Time {
