@@ -1,7 +1,39 @@
 # EdgeGate
 
-High-performance reverse proxy with hot-reloadable configuration, TLS support
-(HTTP/2), per-client rate limiting, and WebSocket proxying.
+High-performance reverse proxy.
+
+## Supported
+
+- HTTP reverse proxy built on Go stdlib with targeted custom control points.
+- WebSocket proxying over HTTP/1.1 upgrade (HTTP/2 WebSocket is not
+  implemented).
+- Hot config reload for routing and rate-limit updates without process restart.
+- Per-client IP token-bucket rate limiting (IPv4/IPv6 + trusted proxies).
+- TLS listener cert/key runtime reload (TLS mode toggle requires listener
+  restart).
+- Single-node v0.1 architecture (no distributed coordination/state sharing).
+
+## Not Yet Supported
+
+- Active/passive upstream health checks.
+- Built-in traffic metrics/statistics endpoint.
+
+## Implementation Notes
+
+- Reverse proxy core intentionally stays close to standard library behavior,
+  with selective customizations for future control.
+- WebSockets are handled via HTTP/1.1 upgrade with bidirectional streaming;
+  RFC 8441 (HTTP/2 WebSocket) is not implemented.
+- A lightweight custom polling watcher detects config changes and triggers
+  reload.
+- Rate limiting is token-bucket per resolved client IP with configurable
+  trusted proxy handling.
+- Updating TLS cert/key is reload-friendly, but enabling/disabling TLS on a
+  listener requires restarting that listener (not the whole process).
+
+## Next
+
+- Planned next feature: upstream load balancing.
 
 ## Quick Start
 
