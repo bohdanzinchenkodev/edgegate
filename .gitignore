@@ -41,3 +41,7 @@ temp/
 # ===== Environment files =====
 .env
 .env.*
+
+# ===== AI =====
+AGENTS.md
+CLAUDE.md
