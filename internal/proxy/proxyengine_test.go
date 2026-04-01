@@ -25,7 +25,7 @@ func TestApplyConfig_NewListenerStartsWithoutMiddlewares(t *testing.T) {
 		},
 	}
 
-	applyConfig(cfg)
+	ApplyConfig(cfg)
 
 	mu.Lock()
 	ps, exists := servers[":0"]
@@ -55,7 +55,7 @@ func TestApplyConfig_ReapplySameConfigKeepsServerInstance(t *testing.T) {
 
 	cfg := &config.ReverseProxyConfig{Listeners: []config.Listener{newListenerForTest(":0", "http://127.0.0.1:9010")}}
 
-	applyConfig(cfg)
+	ApplyConfig(cfg)
 
 	mu.Lock()
 	first := servers[":0"]
@@ -64,7 +64,7 @@ func TestApplyConfig_ReapplySameConfigKeepsServerInstance(t *testing.T) {
 		t.Fatalf("expected server after first apply")
 	}
 
-	applyConfig(cfg)
+	ApplyConfig(cfg)
 
 	mu.Lock()
 	second := servers[":0"]
@@ -83,7 +83,7 @@ func TestApplyConfig_TLSToggleReplacesServerInstance(t *testing.T) {
 	defer resetEngineStateForTest()
 
 	oldCfg := &config.ReverseProxyConfig{Listeners: []config.Listener{newListenerForTest(":0", "http://127.0.0.1:9011")}}
-	applyConfig(oldCfg)
+	ApplyConfig(oldCfg)
 
 	mu.Lock()
 	first := servers[":0"]
@@ -98,7 +98,7 @@ func TestApplyConfig_TLSToggleReplacesServerInstance(t *testing.T) {
 	newListener.TLS.DefaultKeyFile = "./missing-key.pem"
 	newCfg := &config.ReverseProxyConfig{Listeners: []config.Listener{newListener}}
 
-	applyConfig(newCfg)
+	ApplyConfig(newCfg)
 
 	mu.Lock()
 	second := servers[":0"]
@@ -120,7 +120,7 @@ func TestApplyConfig_RouteChangeUpdatesRouterInPlace(t *testing.T) {
 	defer resetEngineStateForTest()
 
 	oldCfg := &config.ReverseProxyConfig{Listeners: []config.Listener{newListenerForTest(":0", "http://127.0.0.1:9012")}}
-	applyConfig(oldCfg)
+	ApplyConfig(oldCfg)
 
 	mu.Lock()
 	first := servers[":0"]
@@ -131,7 +131,7 @@ func TestApplyConfig_RouteChangeUpdatesRouterInPlace(t *testing.T) {
 	}
 
 	newCfg := &config.ReverseProxyConfig{Listeners: []config.Listener{newListenerForTest(":0", "http://127.0.0.1:9013")}}
-	applyConfig(newCfg)
+	ApplyConfig(newCfg)
 
 	mu.Lock()
 	second := servers[":0"]

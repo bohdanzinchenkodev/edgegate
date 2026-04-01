@@ -181,17 +181,17 @@ func StartEngine(ctx context.Context, configPath string) {
 			log.Print(err)
 			return
 		}
-		applyConfig(cfg)
+		ApplyConfig(cfg)
 	}
 
 	fw.ErrorHandler = func(err error) { log.Print(err) }
 
 	fw.Watch(ctx)
 	// Watch returns when ctx is done.
-	shutdownAll()
+	ShutdownAll()
 }
 
-func applyConfig(cfg *config.ReverseProxyConfig) {
+func ApplyConfig(cfg *config.ReverseProxyConfig) {
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -281,7 +281,7 @@ func shutdownServer(ps *proxyServer) {
 	<-ps.done
 }
 
-func shutdownAll() {
+func ShutdownAll() {
 	mu.Lock()
 	old := servers
 	servers = map[string]*proxyServer{}
