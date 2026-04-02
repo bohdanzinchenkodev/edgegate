@@ -5,3 +5,6 @@ k8s-build:
 
 k8s-push: k8s-build
 	docker push $(K8S_IMAGE)
+
+k8s-deploy: k8s-push
+	kubectl rollout restart deployment edgegate
