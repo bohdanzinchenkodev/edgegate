@@ -5,6 +5,7 @@ import (
 	"log"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -72,7 +73,33 @@ func (gr *GatewayReconciler) Reconcile(ctx context.Context, req reconcile.Reques
 		log.Printf("[gateway] failed to sync service ports: %v", err)
 	}
 
+	gr.setGatewayStatus(ctx, &gw)
+
 	return reconcile.Result{}, nil
+}
+
+func (gr *GatewayReconciler) setGatewayStatus(ctx context.Context, gw *gwv1.Gateway) {
+	now := metav1.Now()
+	gw.Status.Conditions = []metav1.Condition{
+		{
+			Type:               string(gwv1.GatewayConditionAccepted),
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: gw.Generation,
+			LastTransitionTime: now,
+			Reason:             string(gwv1.GatewayReasonAccepted),
+		},
+		{
+			Type:               string(gwv1.GatewayConditionProgrammed),
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: gw.Generation,
+			LastTransitionTime: now,
+			Reason:             string(gwv1.GatewayReasonProgrammed),
+		},
+	}
+
+	if err := gr.client.Status().Update(ctx, gw); err != nil {
+		log.Printf("[gateway] failed to update gateway status: %v", err)
+	}
 }
 
 func (gr *GatewayReconciler) syncServicePorts(ctx context.Context, listeners []gwv1.Listener) error {
