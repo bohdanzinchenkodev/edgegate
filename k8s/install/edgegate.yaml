@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgegate
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edgegate
+  template:
+    metadata:
+      labels:
+        app: edgegate
+    spec:
+      serviceAccountName: edgegate
+      containers:
+        - name: edgegate
+          image: bohdanzinchenkodev/edgegate-k8s:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edgegate
+  namespace: default
+spec:
+  type: LoadBalancer
+  selector:
+    app: edgegate
+  ports:
+    - port: 80
+      targetPort: 80
