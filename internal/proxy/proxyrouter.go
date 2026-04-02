@@ -48,14 +48,14 @@ func (pr *proxyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	for _, route := range pr.routes {
-		if route.host != "" && strings.EqualFold(route.host, host) {
-			route.proxy.ServeHTTP(w, r)
-			return
+		if route.host != "" && !strings.EqualFold(route.host, host) {
+			continue
 		}
-		if route.pathPrefix != "" && strings.HasPrefix(path, route.pathPrefix) {
-			route.proxy.ServeHTTP(w, r)
-			return
+		if route.pathPrefix != "" && !strings.HasPrefix(path, route.pathPrefix) {
+			continue
 		}
+		route.proxy.ServeHTTP(w, r)
+		return
 	}
 	http.Error(w, "Bad Gateway", http.StatusBadGateway)
 }
