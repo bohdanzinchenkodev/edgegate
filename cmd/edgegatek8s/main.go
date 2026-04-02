@@ -4,6 +4,7 @@ import (
 	"log"
 
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -25,7 +26,8 @@ func main() {
 		log.Fatalf("unable to register gateway API types: %v", err)
 	}
 
-	reconciler := gateway.NewGatewayReconciler(mgr.GetClient(), egproxy.ApplyConfig)
+	svcName := client.ObjectKey{Namespace: "default", Name: "edgegate"}
+	reconciler := gateway.NewGatewayReconciler(mgr.GetClient(), egproxy.ApplyConfig, svcName)
 
 	err = reconciler.SetupWithManager(mgr)
 	if err != nil {
