@@ -30,7 +30,7 @@ fi
 
 if ! docker image inspect "$EDGEGATE_IMAGE" >/dev/null 2>&1; then
   echo "Building edgegate docker image"
-  docker build -t "$EDGEGATE_IMAGE" -f "$ROOT_DIR/docker/edgegate/Dockerfile" "$ROOT_DIR"
+  docker build -t "$EDGEGATE_IMAGE" -f "$ROOT_DIR/Dockerfile" "$ROOT_DIR"
 fi
 
 docker network create "$DOCKER_NETWORK" 2>/dev/null || true

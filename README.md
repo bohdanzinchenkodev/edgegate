@@ -47,7 +47,7 @@ go build ./cmd/edgegate
 ### Run with Docker
 
 ```bash
-docker build -t edgegate -f docker/edgegate/Dockerfile .
+docker build -t edgegate .
 docker run --rm -v ./configs/edgegate.yaml:/etc/edgegate/edgegate.yaml -p 8080:8080 edgegate
 ```
 

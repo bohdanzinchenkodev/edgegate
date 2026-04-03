@@ -27,7 +27,7 @@ fi
 
 if ! docker image inspect "$VEGETA_IMAGE" >/dev/null 2>&1; then
   echo "Building vegeta docker image"
-  docker build -t "$VEGETA_IMAGE" "$ROOT_DIR/docker/vegeta"
+  docker build -t "$VEGETA_IMAGE" "$BENCH_DIR_REL/vegeta"
 fi
 
 vegeta() {
