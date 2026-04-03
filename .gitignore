@@ -22,7 +22,8 @@
 # GoLand / IntelliJ IDEA
 .idea/
 *.iml
-
+# VS Code
+.vscode/
 # ===== OS files =====
 # macOS
 .DS_Store
@@ -46,3 +47,6 @@ temp/
 AGENTS.md
 CLAUDE.md
 .claude
+
+# ===== configs =====
+configs/
