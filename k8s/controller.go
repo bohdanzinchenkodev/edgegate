@@ -64,7 +64,8 @@ func (gr *GatewayReconciler) Reconcile(ctx context.Context, req reconcile.Reques
 		}
 	}
 
-	cfg := Translate(&gw, matchingRoutes)
+	tlsSecrets := gr.fetchTLSSecrets(ctx, &gw)
+	cfg := Translate(&gw, matchingRoutes, tlsSecrets)
 	log.Printf("[gateway] reconciled: %d listeners, %d routes",
 		len(cfg.Listeners), countRoutes(cfg))
 	gr.applyConfig(cfg)
@@ -100,6 +101,35 @@ func (gr *GatewayReconciler) setGatewayStatus(ctx context.Context, gw *gwv1.Gate
 	if err := gr.client.Status().Update(ctx, gw); err != nil {
 		log.Printf("[gateway] failed to update gateway status: %v", err)
 	}
+}
+
+func (gr *GatewayReconciler) fetchTLSSecrets(ctx context.Context, gw *gwv1.Gateway) map[string]TLSSecret {
+	secrets := make(map[string]TLSSecret)
+	for _, listener := range gw.Spec.Listeners {
+		if listener.TLS == nil {
+			continue
+		}
+		for _, ref := range listener.TLS.CertificateRefs {
+			ns := gw.Namespace
+			if ref.Namespace != nil {
+				ns = string(*ref.Namespace)
+			}
+			key := ns + "/" + string(ref.Name)
+			if _, ok := secrets[key]; ok {
+				continue
+			}
+			var secret corev1.Secret
+			if err := gr.client.Get(ctx, client.ObjectKey{Namespace: ns, Name: string(ref.Name)}, &secret); err != nil {
+				log.Printf("[gateway] failed to fetch TLS secret %s: %v", key, err)
+				continue
+			}
+			secrets[key] = TLSSecret{
+				CertData: secret.Data["tls.crt"],
+				KeyData:  secret.Data["tls.key"],
+			}
+		}
+	}
+	return secrets
 }
 
 func (gr *GatewayReconciler) syncServicePorts(ctx context.Context, listeners []gwv1.Listener) error {

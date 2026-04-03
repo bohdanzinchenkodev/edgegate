@@ -8,18 +8,64 @@ import (
 	"edgegate/internal/config"
 )
 
-func Translate(gateway *gwv1.Gateway, httpRoutes []*gwv1.HTTPRoute) *config.ReverseProxyConfig {
+// TLSSecret holds the raw PEM data fetched from a Kubernetes Secret.
+type TLSSecret struct {
+	CertData []byte
+	KeyData  []byte
+}
+
+func Translate(gateway *gwv1.Gateway, httpRoutes []*gwv1.HTTPRoute, tlsSecrets map[string]TLSSecret) *config.ReverseProxyConfig {
 	cfg := &config.ReverseProxyConfig{}
 
 	for _, listener := range gateway.Spec.Listeners {
 		l := config.Listener{
 			Listen: fmt.Sprintf(":%d", listener.Port),
 		}
+		l.TLS = translateTLS(gateway.Namespace, listener, tlsSecrets)
 		l.Routes = translateRoutes(listener, httpRoutes)
 		cfg.Listeners = append(cfg.Listeners, l)
 	}
 
 	return cfg
+}
+
+func translateTLS(gwNamespace string, listener gwv1.Listener, tlsSecrets map[string]TLSSecret) config.TLSConfig {
+	if listener.TLS == nil || len(listener.TLS.CertificateRefs) == 0 {
+		return config.TLSConfig{}
+	}
+
+	var certs []config.CertEntry
+	for _, ref := range listener.TLS.CertificateRefs {
+		ns := gwNamespace
+		if ref.Namespace != nil {
+			ns = string(*ref.Namespace)
+		}
+		key := ns + "/" + string(ref.Name)
+		secret, ok := tlsSecrets[key]
+		if !ok {
+			continue
+		}
+
+		hostname := ""
+		if listener.Hostname != nil {
+			hostname = string(*listener.Hostname)
+		}
+
+		certs = append(certs, config.CertEntry{
+			Hostname: hostname,
+			CertData: secret.CertData,
+			KeyData:  secret.KeyData,
+		})
+	}
+
+	if len(certs) == 0 {
+		return config.TLSConfig{}
+	}
+
+	return config.TLSConfig{
+		Enabled:      true,
+		Certificates: certs,
+	}
 }
 
 func translateRoutes(listener gwv1.Listener, httpRoutes []*gwv1.HTTPRoute) []config.Route {
