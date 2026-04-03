@@ -2,11 +2,12 @@ apiVersion: v1
 kind: Service
 metadata:
   name: edgegate
-  namespace: default
+  labels:
+    app.kubernetes.io/name: edgegate
 spec:
   type: LoadBalancer
   selector:
-    app: edgegate
+    app.kubernetes.io/name: edgegate
   ports:
     - port: 80
       targetPort: 80

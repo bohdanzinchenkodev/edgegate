@@ -2,12 +2,15 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: edgegate
-  namespace: default
+  labels:
+    app.kubernetes.io/name: edgegate
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: edgegate
+  labels:
+    app.kubernetes.io/name: edgegate
 rules:
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gatewayclasses", "gateways", "httproutes"]
@@ -23,10 +26,12 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: edgegate
+  labels:
+    app.kubernetes.io/name: edgegate
 subjects:
   - kind: ServiceAccount
     name: edgegate
-    namespace: default
+    namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

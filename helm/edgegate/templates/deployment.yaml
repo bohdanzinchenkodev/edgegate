@@ -2,21 +2,21 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: edgegate
-  namespace: default
+  labels:
+    app.kubernetes.io/name: edgegate
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: edgegate
+      app.kubernetes.io/name: edgegate
   template:
     metadata:
       labels:
-        app: edgegate
+        app.kubernetes.io/name: edgegate
     spec:
       serviceAccountName: edgegate
       containers:
         - name: edgegate
-          image: bohdanzinchenkodev/edgegate-k8s:latest
+          image: bohdanzinchenkodev/edgegate-k8s:{{ .Values.tag }}
           ports:
             - containerPort: 80
-
