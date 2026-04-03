@@ -113,6 +113,96 @@ func TestValidate_TLSEnabledWithDefaultCertAllowsRouteWithoutHost(t *testing.T) 
 	}
 }
 
+func TestValidate_TLSEnabledWithCertDataPasses(t *testing.T) {
+	cfg := ReverseProxyConfig{
+		Listeners: []Listener{
+			{
+				Listen: ":8080",
+				TLS: TLSConfig{
+					Enabled: true,
+					Certificates: []CertEntry{
+						{
+							Hostname: "api.example.com",
+							CertData: []byte("cert-pem"),
+							KeyData:  []byte("key-pem"),
+						},
+					},
+				},
+				Routes: []Route{
+					{
+						Match:    Match{Host: "api.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+					},
+				},
+			},
+		},
+	}
+
+	err := validate(cfg)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestValidate_TLSCertDataWithoutKeyDataReturnsError(t *testing.T) {
+	cfg := ReverseProxyConfig{
+		Listeners: []Listener{
+			{
+				Listen: ":8080",
+				TLS: TLSConfig{
+					Enabled: true,
+					Certificates: []CertEntry{
+						{
+							Hostname: "api.example.com",
+							CertData: []byte("cert-pem"),
+						},
+					},
+				},
+				Routes: []Route{
+					{
+						Match:    Match{Host: "api.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+					},
+				},
+			},
+		},
+	}
+
+	err := validate(cfg)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestValidate_TLSCertEntryWithNoFileOrDataReturnsError(t *testing.T) {
+	cfg := ReverseProxyConfig{
+		Listeners: []Listener{
+			{
+				Listen: ":8080",
+				TLS: TLSConfig{
+					Enabled: true,
+					Certificates: []CertEntry{
+						{
+							Hostname: "api.example.com",
+						},
+					},
+				},
+				Routes: []Route{
+					{
+						Match:    Match{Host: "api.example.com"},
+						Upstream: "http://127.0.0.1:9000",
+					},
+				},
+			},
+		},
+	}
+
+	err := validate(cfg)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
 func TestValidate_RateLimitEnabledWithInvalidNumbersReturnsError(t *testing.T) {
 	cfg := ReverseProxyConfig{
 		Listeners: []Listener{

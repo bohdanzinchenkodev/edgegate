@@ -1,6 +1,7 @@
 package egproxy
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"sync"
@@ -16,8 +17,10 @@ type tlsManager struct {
 	loaded map[string]*tls.Certificate // loaded certs, swapped on reload
 }
 type certEntry struct {
-	key  string
-	cert string
+	key      string
+	cert     string
+	keyData  []byte
+	certData []byte
 }
 
 func compileTLSManager(l config.Listener) *tlsManager {
@@ -32,8 +35,10 @@ func compileTLSManager(l config.Listener) *tlsManager {
 		certs := make(map[string]certEntry, len(l.TLS.Certificates))
 		for _, c := range l.TLS.Certificates {
 			certs[c.Hostname] = certEntry{
-				key:  c.KeyFile,
-				cert: c.CertFile,
+				key:      c.KeyFile,
+				cert:     c.CertFile,
+				keyData:  c.KeyData,
+				certData: c.CertData,
 			}
 		}
 		return &tlsManager{certs: certs}
@@ -55,7 +60,13 @@ func (t *tlsManager) Reload(entries map[string]certEntry) error {
 	}
 	loaded := make(map[string]*tls.Certificate, len(entries))
 	for hostname, entry := range entries {
-		cert, err := tls.LoadX509KeyPair(entry.cert, entry.key)
+		var cert tls.Certificate
+		var err error
+		if len(entry.certData) > 0 {
+			cert, err = tls.X509KeyPair(entry.certData, entry.keyData)
+		} else {
+			cert, err = tls.LoadX509KeyPair(entry.cert, entry.key)
+		}
 		if err != nil {
 			return fmt.Errorf("loading cert for %s: %w", hostname, err)
 		}
@@ -95,7 +106,8 @@ func (t *tlsManager) Equal(other *tlsManager) bool {
 	}
 	for k, v := range t.certs {
 		ov, ok := other.certs[k]
-		if !ok || v != ov {
+		if !ok || v.key != ov.key || v.cert != ov.cert ||
+			!bytes.Equal(v.keyData, ov.keyData) || !bytes.Equal(v.certData, ov.certData) {
 			return false
 		}
 	}

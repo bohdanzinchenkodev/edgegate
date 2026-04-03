@@ -166,7 +166,78 @@ func TestTlsManagerEqual_MatchingAndDifferentConfigs(t *testing.T) {
 	}
 }
 
-func mustWriteSelfSignedPair(t *testing.T, dir, commonName string) (string, string) {
+func TestCompileTlsManager_CertDataBuildEntries(t *testing.T) {
+	certPEM, keyPEM := mustGenerateSelfSignedPEM(t, "app.example.com")
+
+	l := config.Listener{}
+	l.TLS.Enabled = true
+	l.TLS.Certificates = []config.CertEntry{
+		{Hostname: "app.example.com", CertData: certPEM, KeyData: keyPEM},
+	}
+
+	tm := compileTLSManager(l)
+	if tm == nil {
+		t.Fatalf("expected tls manager")
+	}
+	entry, ok := tm.certs["app.example.com"]
+	if !ok {
+		t.Fatalf("expected cert entry for app.example.com")
+	}
+	if len(entry.certData) == 0 || len(entry.keyData) == 0 {
+		t.Fatalf("expected certData and keyData to be populated")
+	}
+}
+
+func TestTlsManagerReload_FromCertData(t *testing.T) {
+	certPEM, keyPEM := mustGenerateSelfSignedPEM(t, "app.example.com")
+
+	tm := &tlsManager{certs: map[string]certEntry{
+		"app.example.com": {certData: certPEM, keyData: keyPEM},
+	}}
+
+	err := tm.Reload(nil)
+	if err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+
+	cert, err := tm.GetCertificate(&tls.ClientHelloInfo{ServerName: "app.example.com"})
+	if err != nil || cert == nil {
+		t.Fatalf("expected cert from data, got err=%v", err)
+	}
+}
+
+func TestTlsManagerReload_InvalidCertDataReturnsError(t *testing.T) {
+	tm := &tlsManager{certs: map[string]certEntry{
+		"app.example.com": {certData: []byte("bad"), keyData: []byte("bad")},
+	}}
+
+	err := tm.Reload(nil)
+	if err == nil {
+		t.Fatalf("expected error for invalid cert data")
+	}
+}
+
+func TestTlsManagerEqual_MatchingCertData(t *testing.T) {
+	data := []byte("cert-pem")
+	a := &tlsManager{certs: map[string]certEntry{
+		"app.example.com": {certData: data, keyData: data},
+	}}
+	b := &tlsManager{certs: map[string]certEntry{
+		"app.example.com": {certData: data, keyData: data},
+	}}
+	c := &tlsManager{certs: map[string]certEntry{
+		"app.example.com": {certData: []byte("other"), keyData: data},
+	}}
+
+	if !a.Equal(b) {
+		t.Fatalf("expected equal tls managers with same cert data")
+	}
+	if a.Equal(c) {
+		t.Fatalf("expected tls managers with different cert data to be not equal")
+	}
+}
+
+func mustGenerateSelfSignedPEM(t *testing.T, commonName string) ([]byte, []byte) {
 	t.Helper()
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -189,29 +260,30 @@ func mustWriteSelfSignedPair(t *testing.T, dir, commonName string) (string, stri
 		t.Fatalf("create cert: %v", err)
 	}
 
-	certPath := filepath.Join(dir, commonName+".pem")
-	keyPath := filepath.Join(dir, commonName+".key")
-
-	certOut, err := os.Create(certPath)
-	if err != nil {
-		t.Fatalf("create cert file: %v", err)
-	}
-	defer certOut.Close()
-	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
-		t.Fatalf("encode cert pem: %v", err)
-	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 
 	keyBytes, err := x509.MarshalECPrivateKey(priv)
 	if err != nil {
 		t.Fatalf("marshal key: %v", err)
 	}
-	keyOut, err := os.Create(keyPath)
-	if err != nil {
-		t.Fatalf("create key file: %v", err)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
+
+	return certPEM, keyPEM
+}
+
+func mustWriteSelfSignedPair(t *testing.T, dir, commonName string) (string, string) {
+	t.Helper()
+
+	certPEM, keyPEM := mustGenerateSelfSignedPEM(t, commonName)
+
+	certPath := filepath.Join(dir, commonName+".pem")
+	keyPath := filepath.Join(dir, commonName+".key")
+
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		t.Fatalf("write cert file: %v", err)
 	}
-	defer keyOut.Close()
-	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes}); err != nil {
-		t.Fatalf("encode key pem: %v", err)
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
 	}
 
 	return certPath, keyPath

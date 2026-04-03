@@ -28,7 +28,13 @@ func validate(cfg ReverseProxyConfig) error {
 					return errors.New("hostname must be set for TLS certificate entry in listener " + l.Listen)
 				}
 				if (c.CertFile == "") != (c.KeyFile == "") {
-					return errors.New("TLS cert and key must both be set or both be empty for hostname: " + c.Hostname)
+					return errors.New("TLS cert and key files must both be set or both be empty for hostname: " + c.Hostname)
+				}
+				if (len(c.CertData) == 0) != (len(c.KeyData) == 0) {
+					return errors.New("TLS cert and key data must both be set or both be empty for hostname: " + c.Hostname)
+				}
+				if c.CertFile == "" && len(c.CertData) == 0 {
+					return errors.New("TLS certificate entry must have cert_file/key_file or cert_data/key_data for hostname: " + c.Hostname)
 				}
 				certHosts[c.Hostname] = struct{}{}
 			}

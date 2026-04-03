@@ -33,6 +33,8 @@ type CertEntry struct {
 	Hostname string `yaml:"hostname"`
 	CertFile string `yaml:"cert_file"`
 	KeyFile  string `yaml:"key_file"`
+	CertData []byte `yaml:"cert_data"`
+	KeyData  []byte `yaml:"key_data"`
 }
 type rateLimitPolicy struct {
 	Enabled bool `yaml:"enabled"`
