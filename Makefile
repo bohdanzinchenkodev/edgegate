@@ -38,5 +38,13 @@ k8s-chart-index:
 k8s-chart-publish: k8s-chart-package k8s-chart-index
 	cd $(CHART_REPO) && git add . && git commit -m "publish edgegate chart" && git push origin main
 
+CN = edgegate.local
+DAYS = 365
+
+tls-gen-cert:
+	openssl req -x509 -newkey rsa:2048 -nodes \
+		-keyout tls.key -out tls.crt \
+		-days $(DAYS) -subj "/CN=$(CN)"
+
 k8s-apply-samples:
 	kubectl apply -f k8s/samples/
