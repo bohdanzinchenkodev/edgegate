@@ -1,4 +1,4 @@
-package gateway
+package k8s
 
 import (
 	"context"

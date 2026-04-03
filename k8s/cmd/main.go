@@ -9,7 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	"edgegate/internal/gateway"
+	"edgegate/k8s"
 	egproxy "edgegate/internal/proxy"
 )
 
@@ -27,7 +27,7 @@ func main() {
 	}
 
 	svcName := client.ObjectKey{Namespace: "default", Name: "edgegate"}
-	reconciler := gateway.NewGatewayReconciler(mgr.GetClient(), egproxy.ApplyConfig, svcName)
+	reconciler := k8s.NewGatewayReconciler(mgr.GetClient(), egproxy.ApplyConfig, svcName)
 
 	err = reconciler.SetupWithManager(mgr)
 	if err != nil {
