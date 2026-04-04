@@ -1,0 +1,14 @@
+services:
+  edgegate:
+    build: .
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    volumes:
+      - ./configs/compose-config.yaml:/etc/edgegate/edgegate.yaml
+      - /tmp/edgegatek8s:/etc/edgegate/tls
+    depends_on:
+      - httpbin
+
+  httpbin:
+    image: mccutchen/go-httpbin
