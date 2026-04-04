@@ -38,13 +38,28 @@ k8s-chart-index:
 k8s-chart-publish: k8s-chart-package k8s-chart-index
 	cd $(CHART_REPO) && git add . && git commit -m "publish edgegate chart" && git push origin main
 
-CN = edgegate.local
+CN = app.example.com
 DAYS = 365
+TLS_DIR = /tmp/edgegatek8s
 
 tls-gen-cert:
+	@mkdir -p $(TLS_DIR)
 	openssl req -x509 -newkey rsa:2048 -nodes \
-		-keyout tls.key -out tls.crt \
+		-keyout $(TLS_DIR)/tls.key -out $(TLS_DIR)/tls.crt \
 		-days $(DAYS) -subj "/CN=$(CN)"
+
+k8s-tls-secret: tls-gen-cert
+	kubectl create secret tls app-tls \
+		--cert=$(TLS_DIR)/tls.crt --key=$(TLS_DIR)/tls.key \
+		--dry-run=client -o yaml | kubectl apply -f -
 
 k8s-apply-samples:
 	kubectl apply -f k8s/samples/
+
+k8s-test-http:
+	@EXTERNAL_IP=$$(kubectl get svc edgegate -o jsonpath='{.status.loadBalancer.ingress[0].ip}'); \
+	curl http://$$EXTERNAL_IP/get
+
+k8s-test-https:
+	@EXTERNAL_IP=$$(kubectl get svc edgegate -o jsonpath='{.status.loadBalancer.ingress[0].ip}'); \
+	curl --resolve $(CN):443:$$EXTERNAL_IP https://$(CN)/get -k

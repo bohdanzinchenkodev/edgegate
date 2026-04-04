@@ -9,3 +9,11 @@ spec:
     - name: http
       port: 80
       protocol: HTTP
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: "app.example.com"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: app-tls
