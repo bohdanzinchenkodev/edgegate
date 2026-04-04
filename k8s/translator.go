@@ -17,12 +17,30 @@ type TLSSecret struct {
 func Translate(gateway *gwv1.Gateway, httpRoutes []*gwv1.HTTPRoute, tlsSecrets map[string]TLSSecret) *config.ReverseProxyConfig {
 	cfg := &config.ReverseProxyConfig{}
 
+	portGroups := make(map[int32][]gwv1.Listener)
 	for _, listener := range gateway.Spec.Listeners {
+		port := int32(listener.Port)
+		portGroups[port] = append(portGroups[port], listener)
+	}
+
+	for port := range portGroups {
 		l := config.Listener{
-			Listen: fmt.Sprintf(":%d", listener.Port),
+			Listen: fmt.Sprintf(":%d", port),
 		}
-		l.TLS = translateTLS(gateway.Namespace, listener, tlsSecrets)
-		l.Routes = translateRoutes(listener, httpRoutes)
+		var allCerts []config.CertEntry
+		for _, listener := range portGroups[port] {
+			tlsCfg := translateTLS(gateway.Namespace, listener, tlsSecrets)
+			if tlsCfg.Enabled {
+				allCerts = append(allCerts, tlsCfg.Certificates...)
+			}
+			l.Routes = append(l.Routes, translateRoutes(listener, httpRoutes)...)
+		}
+		if len(allCerts) > 0 {
+			l.TLS = config.TLSConfig{
+				Enabled:      true,
+				Certificates: allCerts,
+			}
+		}
 		cfg.Listeners = append(cfg.Listeners, l)
 	}
 
