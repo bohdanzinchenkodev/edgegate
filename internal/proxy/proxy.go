@@ -71,9 +71,12 @@ func (proxy *EdgeGateProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 
 	ctx := req.Context()
 	outreq := req.Clone(ctx)
-	if proxy.Prefix != "" {
+
+	// Remove the listener's prefix from the request URL path before forwarding to upstream.
+	if proxy.Prefix != "" && proxy.Prefix != "/" {
 		outreq.URL.Path = strings.TrimPrefix(outreq.URL.Path, proxy.Prefix)
 	}
+	log.Print("outreq.URL.Path: ", outreq.URL.Path)
 	if proxy.ReplaceHostToUpstream {
 		outreq.Host = proxy.upstream.Host
 	}
