@@ -112,8 +112,11 @@ func TestReconcile_GatewayNotFoundReturnsNoError(t *testing.T) {
 		WithScheme(testScheme()).
 		Build()
 
+	called := false
+	var applied *config.ReverseProxyConfig
 	applyFn := func(cfg *config.ReverseProxyConfig) {
-		t.Fatalf("applyConfig should not be called for missing gateway")
+		called = true
+		applied = cfg
 	}
 
 	gr := NewGatewayReconciler(c, applyFn, client.ObjectKey{Namespace: "default", Name: "edgegate"})
@@ -122,6 +125,50 @@ func TestReconcile_GatewayNotFoundReturnsNoError(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected no error for missing gateway, got %v", err)
+	}
+	if !called {
+		t.Fatalf("expected empty config apply when no managed Gateway exists")
+	}
+	if applied == nil {
+		t.Fatalf("expected applied config to be set")
+	}
+	if len(applied.Listeners) != 0 {
+		t.Fatalf("expected empty applied config, got %d listeners", len(applied.Listeners))
+	}
+}
+
+func TestReconcile_MissingGatewayDoesNotClearWhenManagedGatewayExists(t *testing.T) {
+	gc := &gwv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "edgegate"},
+		Spec:       gwv1.GatewayClassSpec{ControllerName: controllerName},
+	}
+	gw := &gwv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "present-gw", Namespace: "default"},
+		Spec: gwv1.GatewaySpec{
+			GatewayClassName: "edgegate",
+			Listeners:        []gwv1.Listener{{Name: "http", Port: 8080}},
+		},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme()).
+		WithObjects(gc, gw).
+		Build()
+
+	called := false
+	applyFn := func(cfg *config.ReverseProxyConfig) {
+		called = true
+	}
+
+	gr := NewGatewayReconciler(c, applyFn, client.ObjectKey{Namespace: "default", Name: "edgegate"})
+	_, err := gr.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: client.ObjectKey{Namespace: "default", Name: "missing-gw"},
+	})
+	if err != nil {
+		t.Fatalf("expected no error for missing gateway, got %v", err)
+	}
+	if called {
+		t.Fatalf("did not expect applyConfig call when other managed Gateways exist")
 	}
 }
 
@@ -319,5 +366,71 @@ func TestHttpRouteToGateway_NonHTTPRouteReturnsNil(t *testing.T) {
 
 	if requests != nil {
 		t.Fatalf("expected nil for non-HTTPRoute object, got %v", requests)
+	}
+}
+
+func TestSecretToGateway_MapsReferencedSecretsToGatewayRequests(t *testing.T) {
+	gwWithSecret := &gwv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw-with-cert", Namespace: "default"},
+		Spec: gwv1.GatewaySpec{
+			Listeners: []gwv1.Listener{{
+				Name: "https",
+				Port: 443,
+				TLS: &gwv1.ListenerTLSConfig{
+					CertificateRefs: []gwv1.SecretObjectReference{{Name: "app-tls"}},
+				},
+			}},
+		},
+	}
+	gwWithoutSecret := &gwv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw-without-cert", Namespace: "default"},
+		Spec: gwv1.GatewaySpec{
+			Listeners: []gwv1.Listener{{Name: "http", Port: 80}},
+		},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme()).
+		WithObjects(gwWithSecret, gwWithoutSecret).
+		Build()
+
+	gr := NewGatewayReconciler(c, nil, client.ObjectKey{})
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "app-tls", Namespace: "default"}}
+
+	requests := gr.secretToGateway(context.Background(), secret)
+
+	if len(requests) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(requests))
+	}
+	if requests[0].NamespacedName.Name != "gw-with-cert" || requests[0].NamespacedName.Namespace != "default" {
+		t.Fatalf("unexpected request: %v", requests[0])
+	}
+}
+
+func TestSecretToGateway_UnreferencedSecretReturnsNoRequests(t *testing.T) {
+	gw := &gwv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "default"},
+		Spec: gwv1.GatewaySpec{
+			Listeners: []gwv1.Listener{{
+				Name: "https",
+				Port: 443,
+				TLS: &gwv1.ListenerTLSConfig{
+					CertificateRefs: []gwv1.SecretObjectReference{{Name: "other-secret"}},
+				},
+			}},
+		},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme()).
+		WithObjects(gw).
+		Build()
+
+	gr := NewGatewayReconciler(c, nil, client.ObjectKey{})
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "app-tls", Namespace: "default"}}
+
+	requests := gr.secretToGateway(context.Background(), secret)
+	if len(requests) != 0 {
+		t.Fatalf("expected 0 requests for unreferenced secret, got %d", len(requests))
 	}
 }
