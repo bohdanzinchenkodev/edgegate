@@ -60,6 +60,27 @@ k8s-test-http:
 	@EXTERNAL_IP=$$(kubectl get svc edgegate -o jsonpath='{.status.loadBalancer.ingress[0].ip}'); \
 	curl http://$$EXTERNAL_IP/get
 
+bench-start:
+	./bench/start-proxy.sh $(VARIANT)
+
+bench-start-tls:
+	./bench/start-proxy.sh tls
+
+bench-start-ratelimit:
+	./bench/start-proxy.sh ratelimit
+
+bench-attack:
+	./bench/attack-proxy.sh
+
+bench-attack-tls:
+	./bench/attack-proxy.sh --tls
+
+bench-swap:
+	./bench/swap-config.sh $(VARIANT)
+
+bench-baseline:
+	./bench/upstream-direct.sh
+
 k8s-e2e:
 	./e2e/run.sh
 

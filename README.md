@@ -94,10 +94,10 @@ listeners:
 ## Tests & Benchmarks
 
 ```bash
-go test ./...                              # all tests
-go test -race ./...                        # race detector
-go vet ./...                               # static analysis
-go test -bench=. ./internal/ratelimit/...  # benchmarks
+make test               # all tests
+make test-race          # race detector
+make vet                # static analysis
+make bench              # benchmarks
 ```
 
 ### E2E
@@ -116,24 +116,43 @@ Only requirement is Docker. Results and HTML plots go to `/tmp/edgegate-bench/`.
 
 ```bash
 # Terminal 1 — start upstream + edgegate
-./bench/start-proxy.sh                     # default config (no rate limit)
-./bench/start-proxy.sh tls                 # TLS config
-./bench/start-proxy.sh ratelimit           # rate-limited config
+make bench-start                           # default config (no rate limit)
+make bench-start-tls                       # TLS config
+make bench-start-ratelimit                 # rate-limited config
 
 # Terminal 2 — run load test
-./bench/attack-proxy.sh                    # HTTP attack
-./bench/attack-proxy.sh --tls             # HTTPS attack
+make bench-attack                          # HTTP attack
+make bench-attack-tls                      # HTTPS attack
 
 # Terminal 3 — swap config mid-test
-./bench/swap-config.sh ratelimit           # enable rate limiting
-./bench/swap-config.sh base                # back to no rate limiting
+make bench-swap VARIANT=ratelimit          # enable rate limiting
+make bench-swap VARIANT=base               # back to no rate limiting
 
 # Standalone baseline (no edgegate in the path)
-./bench/upstream-direct.sh
+make bench-baseline
 ```
 
 Defaults (rate, duration, ports, etc.) are centralized in `bench/bench.env`.
 Config variants live in `bench/configs/` as YAML templates.
+
+### Results
+
+10,000 req/s over 30 seconds (300K total requests). Docker on macOS.
+
+|              | Direct (no proxy) | Through EdgeGate | Overhead |
+|--------------|--------------------|-------------------|----------|
+| p50 latency  | 174μs              | 381μs             | +207μs   |
+| p90 latency  | 281μs              | 994μs             | +713μs   |
+| p99 latency  | 934μs              | 4.66ms            | +3.72ms  |
+| Success rate | 100%               | 100%              |          |
+
+**Baseline (direct to upstream)**
+
+![Baseline latency](bench/results/baseline.png)
+
+**Through EdgeGate**
+
+![Proxy latency](bench/results/proxy.png)
 
 ## Project Structure
 
