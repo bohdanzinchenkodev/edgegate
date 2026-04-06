@@ -13,6 +13,8 @@ High-performance reverse proxy.
   restart).
 - Single-node v0.1 architecture (no distributed coordination/state sharing).
 
+- Kubernetes deployment via custom Gateway API controller with Helm chart.
+
 ## Not Yet Supported
 
 - Active/passive upstream health checks.
@@ -51,6 +53,20 @@ docker build -t edgegate .
 docker run --rm -v ./configs/edgegate.yaml:/etc/edgegate/edgegate.yaml -p 8080:8080 edgegate
 ```
 
+### Deploy to Kubernetes
+
+```bash
+# Install Gateway API CRDs
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+
+# Install with Helm
+helm install edgegate ./k8s/helm
+
+# Create a Gateway and HTTPRoute
+kubectl apply -f k8s/samples/gateway.yaml
+kubectl apply -f k8s/samples/httproute.yaml
+```
+
 ## Configuration
 
 EdgeGate uses a YAML config file. Changes are detected automatically (5s poll)
@@ -82,6 +98,16 @@ go test ./...                              # all tests
 go test -race ./...                        # race detector
 go vet ./...                               # static analysis
 go test -bench=. ./internal/ratelimit/...  # benchmarks
+```
+
+### E2E
+
+Requires [Docker](https://docs.docker.com/get-docker/), [kind](https://kind.sigs.k8s.io/), [kubectl](https://kubernetes.io/docs/tasks/tools/), and [Helm](https://helm.sh/docs/intro/install/).
+
+```bash
+make k8s-e2e            # spin up kind cluster, run tests, tear down
+make k8s-e2e-debug      # same but keeps cluster alive on failure
+make k8s-e2e-teardown   # delete the kind cluster
 ```
 
 ## Load Testing
@@ -117,6 +143,11 @@ internal/
   config/                 YAML parsing, file watcher, validation
   proxy/                  Server lifecycle, routing, reverse proxy, rate limiting
 configs/                  Example configuration
+k8s/
+  controller/             Gateway API controller
+  helm/                   Helm chart
+  samples/                Gateway and HTTPRoute examples
+e2e/                      E2E test suite (kind)
 bench/                    Load testing scripts, config variants, shared env
 docker/
   edgegate/               Dockerfile for edgegate
