@@ -60,6 +60,15 @@ k8s-test-http:
 	@EXTERNAL_IP=$$(kubectl get svc edgegate -o jsonpath='{.status.loadBalancer.ingress[0].ip}'); \
 	curl http://$$EXTERNAL_IP/get
 
+k8s-e2e:
+	./e2e/run.sh
+
+k8s-e2e-debug:
+	./e2e/run.sh --no-teardown
+
+k8s-e2e-teardown:
+	./e2e/teardown.sh
+
 k8s-test-https:
 	@EXTERNAL_IP=$$(kubectl get svc edgegate -o jsonpath='{.status.loadBalancer.ingress[0].ip}'); \
 	curl --resolve $(CN):443:$$EXTERNAL_IP https://$(CN)/get -k
