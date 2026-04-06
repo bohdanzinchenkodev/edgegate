@@ -17,6 +17,7 @@ spec:
       serviceAccountName: edgegate
       containers:
         - name: edgegate
-          image: bohdanzinchenkodev/edgegate-k8s:{{ .Values.tag }}
+          image: {{ .Values.image }}:{{ .Values.tag }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - containerPort: 80
